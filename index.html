@@ -207,7 +207,7 @@ select{font-family:var(--body);font-size:15px;min-height:44px;padding:6px 10px;b
         </div>
         <label class="check"><input type="checkbox" id="optList" checked> Lista de splits al costado</label>
         <label class="check"><input type="checkbox" id="optFlash" checked> Destello en cada tiro</label>
-        <label class="check"><input type="checkbox" id="optMark" checked> Logo GHOST VIDEO TIMER abajo de los tiros</label>
+        <label class="check"><input type="checkbox" id="optMark" checked> Logo GHOST VIDEO TIMER al final, abajo de los tiros</label>
       </section>
 
       <section class="panel" id="pExp" role="tabpanel" hidden>
@@ -221,7 +221,7 @@ select{font-family:var(--body);font-size:15px;min-height:44px;padding:6px 10px;b
         <div class="stack">
           <button class="btn primary" id="exportBtn" type="button" disabled>Grabar video con tiempos</button>
           <div class="bar" id="bar" hidden><i id="barFill"></i></div>
-          <p class="hint" id="exportHint">Versión 8 · La grabación corre en tiempo real. Dejá la pantalla prendida y no cambies de app mientras graba.</p>
+          <p class="hint" id="exportHint">Versión 9 · La grabación corre en tiempo real. Dejá la pantalla prendida y no cambies de app mientras graba.</p>
           <button class="btn dark" id="saveBtn" type="button" hidden>Guardar video</button>
         </div>
       </section>
@@ -409,12 +409,13 @@ function drawOverlay(c, W, H, t){
     });
     c.textAlign = 'left';
   }
-  // watermark: same width as the shot list, right under the last shot
-  if (O.mark && WM.complete && WM.naturalWidth) {
+  // watermark: only at the end (after the last shot), same width as the shot list, right under it
+  if (O.mark && st.final && st.n && WM.complete && WM.naturalWidth) {
+    const fade = Math.min(1, Math.max(0, (t - st.passed[st.n - 1]) / 0.35));
     const sz = lwBox, gap = m * 0.4;
     const wy = bottom ? edge - gap - sz : edge + gap;
     if (wy >= 0 && wy + sz <= H) {
-      c.save(); c.globalAlpha = 0.92;
+      c.save(); c.globalAlpha = 0.92 * fade;
       roundRect(c, lxBox, wy, sz, sz, u * 0.14); c.clip();
       c.drawImage(WM, lxBox, wy, sz, sz);
       c.restore();
