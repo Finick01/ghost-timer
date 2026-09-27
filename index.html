@@ -220,7 +220,7 @@ select{font-family:var(--body);font-size:15px;min-height:44px;padding:6px 10px;b
         <div class="stack">
           <button class="btn primary" id="exportBtn" type="button" disabled>Grabar video con tiempos</button>
           <div class="bar" id="bar" hidden><i id="barFill"></i></div>
-          <p class="hint" id="exportHint">Versión 5 · La grabación corre en tiempo real. Dejá la pantalla prendida y no cambies de app mientras graba.</p>
+          <p class="hint" id="exportHint">Versión 6 · La grabación corre en tiempo real. Dejá la pantalla prendida y no cambies de app mientras graba.</p>
           <button class="btn dark" id="saveBtn" type="button" hidden>Guardar video</button>
         </div>
       </section>
@@ -777,9 +777,28 @@ $('exportBtn').onclick = exportAny;
 
 let dl = null;
 (async () => { try { dl = window.claude && window.claude.use ? await window.claude.use('downloads') : null; } catch (e) { dl = null; } })();
+async function saveToAndroid(blob, filename){
+  const A = window.GhostAndroid;
+  if (!A.begin(filename, blob.type || 'video/mp4')) return false;
+  const CH = 3 * 1024 * 1024; // multiple of 3 so each piece is valid base64 on its own
+  for (let i = 0; i < blob.size; i += CH) {
+    const b64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.onerror = rej; r.readAsDataURL(blob.slice(i, i + CH)); });
+    if (!A.append(b64)) return false;
+    $('barFill').style.width = Math.min(100, (i + CH) / blob.size * 100) + '%';
+  }
+  return A.finish() || false;
+}
 $('saveBtn').onclick = async () => {
   if (!S.blob) return;
   const filename = `${S.name}-tiempos.${S.ext}`;
+  if (window.GhostAndroid) {
+    msg('Guardando en la galería…'); $('bar').hidden = false; $('saveBtn').disabled = true;
+    let uri = false; try { uri = await saveToAndroid(S.blob, filename); } catch (e) { uri = false; }
+    $('bar').hidden = true; $('saveBtn').disabled = false;
+    if (uri) { msg('Video guardado en la galería, en la carpeta Movies/GhostTimer.', 'ok'); try { window.GhostAndroid.share(uri); } catch (e) {} }
+    else msg('No se pudo guardar el video. Revisá que haya espacio en el teléfono y probá de nuevo.', 'warn');
+    return;
+  }
   if (dl) {
     try { await dl.save({ filename, data: S.blob }); msg('Video guardado.', 'ok'); return; }
     catch (e) { if (e && e.code === 'declined') { msg('Guardado cancelado.'); return; } if (e && e.code === 'rate_limited') { msg('Ya hay una ventana de guardado abierta.'); return; } }

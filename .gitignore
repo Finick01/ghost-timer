@@ -1,0 +1,4 @@
+android/tools/
+android/build/
+*.jks
+.ks_pass
