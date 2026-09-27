@@ -221,7 +221,7 @@ select{font-family:var(--body);font-size:15px;min-height:44px;padding:6px 10px;b
         <div class="stack">
           <button class="btn primary" id="exportBtn" type="button" disabled>Grabar video con tiempos</button>
           <div class="bar" id="bar" hidden><i id="barFill"></i></div>
-          <p class="hint" id="exportHint">Versión 10 · La grabación corre en tiempo real. Dejá la pantalla prendida y no cambies de app mientras graba.</p>
+          <p class="hint" id="exportHint">Versión 11 · La grabación corre en tiempo real. Dejá la pantalla prendida y no cambies de app mientras graba.</p>
           <button class="btn dark" id="saveBtn" type="button" hidden>Guardar video</button>
         </div>
       </section>
@@ -332,11 +332,24 @@ function detectBeep(raw){
   return runs.reduce((a, b) => b.len > a.len ? b : a);
 }
 
+// The tone search works in 10 ms frames; find the exact millisecond where the beep starts.
+function refineBeepStart(b){
+  const env = S.env; if (!env) return b.start;
+  const i0 = Math.round(b.start * 1000), i1 = Math.round(b.end * 1000);
+  const body = []; for (let i = i0 + 30; i < Math.max(i0 + 31, i1 - 20) && i < env.length; i++) body.push(env[i]);
+  if (!body.length) return b.start;
+  body.sort((x, y) => x - y);
+  const med = body[Math.floor(body.length / 2)], thr = 0.5 * med;
+  for (let i = Math.max(0, i0 - 40); i < Math.min(env.length - 6, i0 + 40); i++) {
+    if (env[i] >= thr && env[i + 2] >= 0.35 * med && env[i + 5] >= 0.35 * med) return i / 1000;
+  }
+  return b.start;
+}
 function runDetection(){
   if (S.demo || !S.env) return;
   const raw = detectShotsRaw();
   const b = S.mono ? detectBeep(raw) : null;
-  if (b) { S.beep = b.start; S.beepEnd = b.end; }
+  if (b) { S.beep = refineBeepStart(b); S.beepEnd = b.end; }
   else { S.beep = raw.length ? Math.max(0, raw[0] - 1.5) : 0; S.beepEnd = S.beep; }
   S.shots = raw.filter(s => s > S.beepEnd + 0.05 || (!b && s > S.beep));
   S.sel = -1;
