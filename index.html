@@ -220,7 +220,7 @@ select{font-family:var(--body);font-size:15px;min-height:44px;padding:6px 10px;b
         <div class="stack">
           <button class="btn primary" id="exportBtn" type="button" disabled>Grabar video con tiempos</button>
           <div class="bar" id="bar" hidden><i id="barFill"></i></div>
-          <p class="hint" id="exportHint">Versión 6 · La grabación corre en tiempo real. Dejá la pantalla prendida y no cambies de app mientras graba.</p>
+          <p class="hint" id="exportHint">Versión 7 · La grabación corre en tiempo real. Dejá la pantalla prendida y no cambies de app mientras graba.</p>
           <button class="btn dark" id="saveBtn" type="button" hidden>Guardar video</button>
         </div>
       </section>
@@ -828,6 +828,23 @@ window.addEventListener('resize', drawTimeline);
 if (document.fonts && document.fonts.load) Promise.all([document.fonts.load('800 40px "JetBrains Mono"'), document.fonts.load('700 20px "Chakra Petch"')]).then(() => refresh()).catch(() => {});
 refresh();
 requestAnimationFrame(loop);
+
+// Video shared from Google Fotos / galería into the Android app
+window.ghostCheckShared = async () => {
+  if (!window.GhostAndroid || !window.GhostAndroid.takeShared) return;
+  let info = ''; try { info = window.GhostAndroid.takeShared(); } catch (e) { info = ''; }
+  if (!info) return;
+  const [token, mime, ...rest] = info.split('|'); const name = rest.join('|') || 'video.mp4';
+  if (S.exporting) return;
+  msg('Cargando el video compartido…');
+  try {
+    const res = await fetch('__shared/' + token, { cache: 'no-store' });
+    if (!res.ok) throw new Error('http ' + res.status);
+    const blob = await res.blob();
+    await loadFile(new File([blob], name, { type: mime || blob.type || 'video/mp4' }));
+  } catch (e) { msg('No pude abrir el video compartido. Probá cargarlo con "+ Video".', 'warn'); }
+};
+window.ghostCheckShared();
 })();
 </script>
 

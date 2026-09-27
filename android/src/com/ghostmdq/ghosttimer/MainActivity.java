@@ -27,7 +27,15 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Toast;
 
+import android.database.Cursor;
+import android.provider.OpenableColumns;
+import android.webkit.ServiceWorkerClient;
+import android.webkit.ServiceWorkerController;
+import android.webkit.WebResourceResponse;
+import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.HashMap;
+import java.util.Map;
 
 public class MainActivity extends Activity {
     private static final String APP_URL = "https://finick01.github.io/ghost-timer/";
@@ -35,6 +43,14 @@ public class MainActivity extends Activity {
 
     private WebView web;
     private ValueCallback<Uri[]> fileCallback;
+
+    // Video received from "Compartir" / "Abrir con": served to the page at <APP_URL>__shared/<token>
+    private Uri sharedUri;
+    private String sharedName = "video.mp4";
+    private String sharedMime = "video/mp4";
+    private String sharedToken;
+    private boolean sharedDelivered = true;
+    private boolean pageReady = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -76,11 +92,31 @@ public class MainActivity extends Activity {
         s.setAllowContentAccess(true);
         s.setAllowFileAccess(false);
         s.setCacheMode(WebSettings.LOAD_DEFAULT);
-        s.setUserAgentString(s.getUserAgentString() + " GhostTimerAndroid/1.1");
+        s.setUserAgentString(s.getUserAgentString() + " GhostTimerAndroid/1.2");
 
         web.addJavascriptInterface(new Bridge(), "GhostAndroid");
 
+        if (Build.VERSION.SDK_INT >= 24) {
+            ServiceWorkerController.getInstance().setServiceWorkerClient(new ServiceWorkerClient() {
+                @Override
+                public WebResourceResponse shouldInterceptRequest(WebResourceRequest req) {
+                    return serveShared(req);
+                }
+            });
+        }
+
         web.setWebViewClient(new WebViewClient() {
+            @Override
+            public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest req) {
+                return serveShared(req);
+            }
+
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                pageReady = true;
+                notifyPageOfShared();
+            }
+
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
                 Uri u = req.getUrl();
@@ -110,8 +146,75 @@ public class MainActivity extends Activity {
             }
         });
 
+        handleIncoming(getIntent());
         if (savedInstanceState != null) web.restoreState(savedInstanceState);
         else web.loadUrl(APP_URL);
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        if (handleIncoming(intent)) notifyPageOfShared();
+    }
+
+    /** Picks up a video shared from Google Fotos, the gallery or "Abrir con". */
+    private boolean handleIncoming(Intent intent) {
+        if (intent == null) return false;
+        Uri u = null;
+        String action = intent.getAction();
+        if (Intent.ACTION_SEND.equals(action)) {
+            Object extra = intent.getParcelableExtra(Intent.EXTRA_STREAM);
+            if (extra instanceof Uri) u = (Uri) extra;
+            if (u == null && intent.getClipData() != null && intent.getClipData().getItemCount() > 0)
+                u = intent.getClipData().getItemAt(0).getUri();
+        } else if (Intent.ACTION_VIEW.equals(action)) {
+            u = intent.getData();
+        }
+        if (u == null) return false;
+        sharedUri = u;
+        String type = intent.getType();
+        if (type == null) type = getContentResolver().getType(u);
+        sharedMime = (type != null && type.startsWith("video/")) ? type : "video/mp4";
+        sharedName = "video.mp4";
+        Cursor c = null;
+        try {
+            c = getContentResolver().query(u, new String[]{ OpenableColumns.DISPLAY_NAME }, null, null, null);
+            if (c != null && c.moveToFirst()) {
+                String n = c.getString(0);
+                if (n != null && !n.isEmpty()) sharedName = n;
+            }
+        } catch (Exception e) {
+        } finally {
+            if (c != null) c.close();
+        }
+        sharedToken = Long.toHexString(System.nanoTime());
+        sharedDelivered = false;
+        // one video per launch: don't reload it again after rotation or restore
+        intent.setAction(Intent.ACTION_MAIN);
+        return true;
+    }
+
+    private void notifyPageOfShared() {
+        if (!pageReady || sharedDelivered || web == null) return;
+        web.evaluateJavascript("window.ghostCheckShared && window.ghostCheckShared()", null);
+    }
+
+    private WebResourceResponse serveShared(WebResourceRequest req) {
+        try {
+            Uri u = req.getUrl();
+            String path = u.getPath();
+            if (sharedUri == null || sharedToken == null || path == null) return null;
+            if (!path.endsWith("/__shared/" + sharedToken)) return null;
+            InputStream in = getContentResolver().openInputStream(sharedUri);
+            if (in == null) return null;
+            Map<String, String> h = new HashMap<String, String>();
+            h.put("Cache-Control", "no-store");
+            h.put("Access-Control-Allow-Origin", "*");
+            return new WebResourceResponse(sharedMime, null, 200, "OK", h, in);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     @Override
@@ -202,6 +305,14 @@ public class MainActivity extends Activity {
                 closeQuietly();
                 return "";
             }
+        }
+
+        /** Returns the pending shared video as "token|mime|name", or "" if there is none. */
+        @JavascriptInterface
+        public String takeShared() {
+            if (sharedDelivered || sharedToken == null) return "";
+            sharedDelivered = true;
+            return sharedToken + "|" + sharedMime + "|" + sharedName;
         }
 
         @JavascriptInterface
