@@ -1,0 +1,691 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#15191d"><meta name="description" content="Timer de tiro por video: detecta el beep y los disparos en el audio y pone los tiempos sobre el video."><link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon-192.png" type="image/png"><link rel="apple-touch-icon" href="apple-touch-icon.png"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Ghosttimer"><style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style></head><body><title>Ghosttimer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@500;700;800&display=swap">
+<style>
+:root{
+  --ground:#e9ecef; --panel:#fbfcfc; --panel-2:#f1f3f5; --ink:#15191d; --muted:#5e6972;
+  --line:#d3d8dd; --accent:#f04e14; --accent-ink:#fff; --accent-soft:#fde3d8;
+  --good:#1f8a4c; --warn:#b7791f; --stage:#0d1012; --wave:#8b97a1; --wave-hi:#15191d;
+  --display:"Chakra Petch", "Arial Narrow", system-ui, sans-serif;
+  --body:"IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono:"JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --nav-h:62px;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --ground:#101316; --panel:#181c20; --panel-2:#1f2429; --ink:#e7eaed; --muted:#98a3ad;
+    --line:#2c3339; --accent:#ff6330; --accent-ink:#140803; --accent-soft:#3a1a0e;
+    --good:#4cc47f; --warn:#e0a93f; --stage:#070909; --wave:#5d6973; --wave-hi:#e7eaed;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --ground:#101316; --panel:#181c20; --panel-2:#1f2429; --ink:#e7eaed; --muted:#98a3ad;
+  --line:#2c3339; --accent:#ff6330; --accent-ink:#140803; --accent-soft:#3a1a0e;
+  --good:#4cc47f; --warn:#e0a93f; --stage:#070909; --wave:#5d6973; --wave-hi:#e7eaed;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{background:var(--ground);color:var(--ink);font-family:var(--body);font-size:15px;line-height:1.45}
+.app{max-width:1320px;margin:0 auto;padding-inline:16px;padding-block:10px calc(var(--nav-h) + env(safe-area-inset-bottom, 0px) + 20px);display:flex;flex-direction:column;gap:12px}
+.top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.brand{display:flex;align-items:center;gap:10px;min-width:0}
+.logo{width:30px;height:30px;border-radius:8px;background:var(--ink);display:grid;place-items:center;flex:none}
+.logo i{width:12px;height:12px;border-radius:50%;border:3px solid var(--accent);display:block}
+.brand h1{font-family:var(--display);font-weight:700;font-size:21px;letter-spacing:.05em;text-transform:uppercase;margin:0}
+.brand h1 b{color:var(--accent)}
+.btn{font-family:var(--display);font-weight:600;letter-spacing:.06em;text-transform:uppercase;font-size:13px;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:10px;min-height:44px;padding:8px 14px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px;white-space:nowrap;touch-action:manipulation;user-select:none}
+.btn:active{transform:scale(.97)}
+.btn:focus-visible,input:focus-visible,select:focus-visible,.tabs button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.dark{background:var(--ink);border-color:var(--ink);color:var(--panel)}
+.btn:disabled{opacity:.4;cursor:not-allowed;transform:none}
+.grid{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;align-items:start}
+@media (min-width:900px){.grid{grid-template-columns:minmax(0,1fr) 380px}}
+.player{display:flex;flex-direction:column;gap:10px;min-width:0}
+.stage{position:relative;background:var(--stage);border-radius:14px;overflow:hidden;display:flex;justify-content:center;align-items:center;min-height:180px;cursor:pointer}
+.stage canvas{display:block;max-width:100%;max-height:46vh;width:auto;height:auto}
+@media (min-width:900px){.stage canvas{max-height:64vh}}
+.stage.drag{outline:3px dashed var(--accent);outline-offset:-8px}
+.badge{position:absolute;right:10px;top:10px;font-family:var(--display);font-size:11px;letter-spacing:.1em;text-transform:uppercase;background:var(--accent);color:var(--accent-ink);padding:3px 8px;border-radius:5px}
+.tlcard{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:10px;display:flex;flex-direction:column;gap:8px}
+.tlhead{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.readout{font-family:var(--mono);font-weight:800;font-size:22px;font-variant-numeric:tabular-nums;line-height:1}
+.readout small{color:var(--muted);font-weight:500;font-size:12px}
+.label{font-family:var(--display);font-weight:600;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+#tl{width:100%;height:96px;display:block;cursor:crosshair;border-radius:8px;background:var(--panel-2);touch-action:none}
+.transport{display:grid;grid-template-columns:1fr 1.6fr 1fr;gap:8px}
+.transport .btn{min-height:52px;font-size:14px}
+.marks{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.marks .btn{min-height:56px;font-size:15px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{font-family:var(--display);font-size:11px;letter-spacing:.08em;text-transform:uppercase;border:0;background:var(--panel);color:var(--muted);padding:7px 11px;cursor:pointer;min-height:34px}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--panel)}
+#posSeg{display:grid;grid-template-columns:1fr 1fr;width:100%}
+#posSeg button{min-height:44px;border-top:1px solid var(--line)}
+#posSeg button:nth-child(-n+2){border-top:0}
+#posSeg button:nth-child(odd){border-right:1px solid var(--line)}
+.keys{display:flex;gap:10px;flex-wrap:wrap;color:var(--muted);font-size:12px}
+@media (pointer:coarse){.keys{display:none}}
+kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 4px;background:var(--panel)}
+.side{display:flex;flex-direction:column;gap:12px;min-width:0}
+.tabs{display:flex;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:4px;gap:4px}
+.tabs button{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;border:0;background:transparent;color:var(--muted);font-family:var(--display);font-weight:600;font-size:11px;letter-spacing:.08em;text-transform:uppercase;padding:7px 4px;border-radius:9px;cursor:pointer;min-height:48px}
+.tabs button svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.tabs button[aria-selected="true"]{background:var(--accent-soft);color:var(--accent)}
+@media (max-width:899px){
+  .tabs{position:fixed;left:0;right:0;bottom:0;z-index:20;border-radius:0;border-width:1px 0 0;padding:6px 10px calc(6px + env(safe-area-inset-bottom, 0px));background:var(--panel)}
+}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:14px}
+.panel h2{font-family:var(--display);font-weight:700;font-size:15px;letter-spacing:.1em;text-transform:uppercase;margin:0;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.panel h2 .label{max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.field{display:flex;flex-direction:column;gap:6px}
+.field .row{display:flex;justify-content:space-between;align-items:baseline}
+.field output{font-family:var(--mono);font-size:13px;color:var(--ink)}
+.hint{color:var(--muted);font-size:13px;margin:0}
+input[type=range]{width:100%;accent-color:var(--accent);height:32px}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.stat{background:var(--panel);padding:9px 10px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.stat b{font-family:var(--mono);font-size:19px;font-weight:800;font-variant-numeric:tabular-nums}
+.stat.hero b{color:var(--accent)}
+.shots{max-height:none;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+@media (min-width:900px){.shots{max-height:340px;overflow:auto}}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+th{position:sticky;top:0;background:var(--panel-2);font-family:var(--display);font-weight:600;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);text-align:left;padding:7px 8px}
+td{padding:5px 8px;border-top:1px solid var(--line);font-family:var(--mono);font-size:14px}
+tr.sel td{background:var(--accent-soft)}
+tr.beep td{color:var(--accent)}
+td.num{color:var(--muted);width:30px}
+td.act{text-align:right;white-space:nowrap}
+td.act button{font-family:var(--mono);font-size:12px;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:7px;min-width:38px;min-height:34px;padding:2px 6px;cursor:pointer;touch-action:manipulation}
+td.act button + button{margin-left:4px}
+tbody tr{cursor:pointer}
+.check{display:flex;align-items:center;gap:10px;font-size:14px;min-height:36px}
+.check input{accent-color:var(--accent);width:20px;height:20px;flex:none}
+.msg{font-size:13px;border-radius:9px;padding:9px 11px;background:var(--panel-2);border:1px solid var(--line)}
+.msg.warn{border-color:var(--warn);color:var(--warn)}
+.msg.ok{border-color:var(--good);color:var(--good)}
+.bar{height:10px;background:var(--panel-2);border-radius:5px;overflow:hidden;border:1px solid var(--line)}
+.bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s linear}
+select{font-family:var(--body);font-size:15px;min-height:44px;padding:6px 10px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--ink)}
+.stack{display:flex;flex-direction:column;gap:10px}
+@media (prefers-reduced-motion: reduce){.bar i{transition:none}.btn:active{transform:none}}
+</style>
+
+<div class="app">
+  <header class="top">
+    <div class="brand"><span class="logo"><i></i></span><h1>Ghost<b>timer</b></h1></div>
+    <input type="file" id="file" accept="video/*" hidden>
+    <button class="btn primary" id="loadBtn" type="button">+ Video</button>
+  </header>
+
+  <div class="grid">
+    <div class="player">
+      <div class="stage" id="stage">
+        <canvas id="cv" width="1280" height="720"></canvas>
+        <span class="badge" id="demoBadge">Ejemplo</span>
+      </div>
+      <div class="tlcard">
+        <div class="tlhead">
+          <div class="readout" id="readout">0.00 <small>/ 0.00 s</small></div>
+          <div class="seg" id="viewSeg">
+            <button type="button" data-v="serie" aria-pressed="true">Serie</button>
+            <button type="button" data-v="todo" aria-pressed="false">Todo</button>
+          </div>
+        </div>
+        <canvas id="tl" aria-label="Audio del video: tocá o arrastrá para moverte"></canvas>
+        <div class="transport">
+          <button class="btn" id="backBtn" type="button" disabled aria-label="Frame anterior">◀ 1f</button>
+          <button class="btn dark" id="playBtn" type="button" disabled>▶ Play</button>
+          <button class="btn" id="fwdBtn" type="button" disabled aria-label="Frame siguiente">1f ▶</button>
+        </div>
+        <div class="marks">
+          <button class="btn" id="beepHere" type="button" disabled>Beep acá</button>
+          <button class="btn primary" id="shotHere" type="button" disabled>+ Tiro acá</button>
+        </div>
+        <div class="keys"><span><kbd>Espacio</kbd> play</span><span><kbd>←</kbd><kbd>→</kbd> frame</span><span><kbd>S</kbd> tiro</span><span><kbd>B</kbd> beep</span><span><kbd>Supr</kbd> borrar tiro</span></div>
+      </div>
+    </div>
+
+    <div class="side">
+      <nav class="tabs" role="tablist">
+        <button type="button" role="tab" data-tab="pTiros" aria-selected="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>Tiros</button>
+        <button type="button" role="tab" data-tab="pDet" aria-selected="false"><svg viewBox="0 0 24 24"><path d="M3 12h3l2-6 4 12 3-9 2 3h4"/></svg>Detección</button>
+        <button type="button" role="tab" data-tab="pPant" aria-selected="false"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M6 9h5M6 12h3"/></svg>Pantalla</button>
+        <button type="button" role="tab" data-tab="pExp" aria-selected="false"><svg viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>Exportar</button>
+      </nav>
+
+      <section class="panel" id="pTiros" role="tabpanel">
+        <h2>Resultado <span class="label" id="statusLbl">Ejemplo</span></h2>
+        <div class="stats">
+          <div class="stat hero"><span class="label">Tiempo</span><b id="stTotal">–</b></div>
+          <div class="stat"><span class="label">Tiros</span><b id="stCount">–</b></div>
+          <div class="stat"><span class="label">1er tiro</span><b id="stDraw">–</b></div>
+          <div class="stat"><span class="label">Mejor split</span><b id="stBest">–</b></div>
+          <div class="stat"><span class="label">Split prom.</span><b id="stAvg">–</b></div>
+          <div class="stat"><span class="label">Beep</span><b id="stBeep">–</b></div>
+        </div>
+        <div class="msg" id="msg">Tocá "+ Video" y elegí un video de una pista. La app busca el pitido del timer y cada disparo en el audio.</div>
+        <div class="shots">
+          <table>
+            <thead><tr><th>#</th><th>Tiempo</th><th>Split</th><th></th></tr></thead>
+            <tbody id="shotBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel" id="pDet" role="tabpanel" hidden>
+        <h2>Detección</h2>
+        <div class="field">
+          <div class="row"><label class="label" for="th">Sensibilidad</label><output id="thOut">40%</output></div>
+          <input type="range" id="th" min="10" max="90" value="40">
+          <p class="hint">Más bajo detecta más tiros. Si aparecen tiros de la pista de al lado, subilo.</p>
+        </div>
+        <div class="field">
+          <div class="row"><label class="label" for="gap">Separación mínima</label><output id="gapOut">90 ms</output></div>
+          <input type="range" id="gap" min="40" max="300" step="5" value="90">
+          <p class="hint">Evita contar el eco como otro tiro.</p>
+        </div>
+        <button class="btn" id="redetect" type="button" disabled>Volver a detectar</button>
+      </section>
+
+      <section class="panel" id="pPant" role="tabpanel" hidden>
+        <h2>Tiempos en pantalla</h2>
+        <div class="field">
+          <span class="label">Posición</span>
+          <div class="seg" id="posSeg">
+            <button type="button" data-p="tl" aria-pressed="true">↖ Arriba izq</button>
+            <button type="button" data-p="tr" aria-pressed="false">Arriba der ↗</button>
+            <button type="button" data-p="bl" aria-pressed="false">↙ Abajo izq</button>
+            <button type="button" data-p="br" aria-pressed="false">Abajo der ↘</button>
+          </div>
+        </div>
+        <div class="field">
+          <div class="row"><label class="label" for="size">Tamaño</label><output id="sizeOut">100%</output></div>
+          <input type="range" id="size" min="50" max="180" value="100">
+        </div>
+        <label class="check"><input type="checkbox" id="optList" checked> Lista de splits al costado</label>
+        <label class="check"><input type="checkbox" id="optFlash" checked> Destello en cada tiro</label>
+      </section>
+
+      <section class="panel" id="pExp" role="tabpanel" hidden>
+        <h2>Exportar</h2>
+        <label class="check"><input type="checkbox" id="optTrim" checked> Recortar a la serie (2 s antes del beep y 2 s después del último tiro)</label>
+        <div class="field">
+          <label class="label" for="res">Resolución</label>
+          <select id="res"><option value="1280">HD 720p (recomendado en el teléfono)</option><option value="1920">Full HD 1080p</option><option value="0">Original</option></select>
+        </div>
+        <div class="stack">
+          <button class="btn primary" id="exportBtn" type="button" disabled>Grabar video con tiempos</button>
+          <div class="bar" id="bar" hidden><i id="barFill"></i></div>
+          <p class="hint" id="exportHint">La grabación corre en tiempo real. Dejá la pantalla prendida y no cambies de app mientras graba.</p>
+          <button class="btn dark" id="saveBtn" type="button" hidden>Guardar video</button>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<video id="vid" playsinline webkit-playsinline preload="auto" hidden></video>
+
+<script>
+(() => {
+const $ = id => document.getElementById(id);
+const cv = $('cv'), ctx = cv.getContext('2d');
+const tl = $('tl'), tctx = tl.getContext('2d');
+const vid = $('vid');
+const FPS = 30;
+
+const S = {
+  demo: true, url: null, name: 'video', dur: 7, mono: null, sr: 48000,
+  env: null,          // 1 ms peak envelope
+  beep: 1.0, beepEnd: 1.3,
+  shots: [2.21, 2.47, 2.71, 3.52, 3.76, 4.61, 4.85, 5.09],
+  sel: -1, view: 'serie',
+  exporting: false, exportEnd: 0, exportStart: 0, blob: null, ext: 'mp4'
+};
+const O = { pos: 'tl', size: 1, list: true, flash: true };
+
+// ---------- demo envelope ----------
+function demoEnv(){
+  const n = S.dur * 1000, e = new Float32Array(n);
+  for (let i = 0; i < n; i++) e[i] = 0.015 + Math.random() * 0.02;
+  for (let i = 1000; i < 1300; i++) e[i] = 0.35 + Math.random() * 0.03;
+  for (const s of S.shots) { const k = Math.round(s * 1000); for (let j = 0; j < 60 && k + j < n; j++) e[k + j] = Math.max(e[k + j], 0.95 * Math.exp(-j / 12) + Math.random() * .03); }
+  return e;
+}
+S.env = demoEnv();
+
+// ---------- helpers ----------
+const f2 = x => (x == null || !isFinite(x)) ? '–' : x.toFixed(2);
+const now = () => S.demo ? demoT : vid.currentTime;
+let demoT = 0, demoStart = performance.now();
+function msg(text, kind){ const m = $('msg'); m.textContent = text; m.className = 'msg' + (kind ? ' ' + kind : ''); }
+function sortedShots(){ return S.shots.slice().sort((a, b) => a - b); }
+
+// ---------- analysis ----------
+async function analyze(file){
+  msg('Leyendo el audio del video…');
+  const buf = await file.arrayBuffer();
+  const AC = window.AudioContext || window.webkitAudioContext;
+  const ac = new AC();
+  let ab;
+  try { ab = await ac.decodeAudioData(buf); }
+  finally { try { ac.close(); } catch(e){} }
+  const sr = ab.sampleRate, len = ab.length, chs = [];
+  for (let c = 0; c < ab.numberOfChannels; c++) chs.push(ab.getChannelData(c));
+  const mono = new Float32Array(len);
+  for (let i = 0; i < len; i++) { let m = 0; for (const ch of chs) { const v = ch[i]; if (Math.abs(v) > Math.abs(m)) m = v; } mono[i] = m; }
+  S.mono = mono; S.sr = sr;
+  const hop = Math.max(1, Math.round(sr / 1000)), n = Math.floor(len / hop), env = new Float32Array(n);
+  for (let i = 0; i < n; i++) { let m = 0; const o = i * hop; for (let j = 0; j < hop; j++) { const a = Math.abs(mono[o + j]); if (a > m) m = a; } env[i] = m; }
+  S.env = env;
+}
+
+function detectShotsRaw(){
+  const env = S.env, n = env.length, th = +$('th').value / 100, gap = +$('gap').value;
+  let max = 0; for (let i = 0; i < n; i++) if (env[i] > max) max = env[i];
+  const thr = th * max, out = []; let last = -1e9;
+  for (let i = 20; i < n; i++) {
+    if (env[i] < thr || i - last < gap) continue;
+    let bg = 0, c = 0;
+    for (let j = Math.max(0, i - 70); j < i - 12; j++) { bg += env[j]; c++; }
+    bg = c ? bg / c : 0;
+    if (env[i] > 2.5 * bg) {
+      let k = i; while (k > i - 6 && env[k - 1] > 0.3 * env[i]) k--;
+      out.push(k / 1000); last = i;
+    }
+  }
+  return out;
+}
+
+function detectBeep(raw){
+  const x = S.mono, sr = S.sr, hop = Math.round(sr / 100), nf = Math.floor(x.length / hop);
+  const rms = new Float32Array(nf), zc = new Float32Array(nf);
+  for (let f = 0; f < nf; f++) {
+    let s = 0, z = 0; const o = f * hop;
+    for (let j = 0; j < hop; j++) { const v = x[o + j]; s += v * v; if (j && ((v >= 0) !== (x[o + j - 1] >= 0))) z++; }
+    rms[f] = Math.sqrt(s / hop); zc[f] = z * 100 / 2; // Hz approx
+  }
+  const sortedR = Array.from(rms).sort((a, b) => a - b);
+  const floor = sortedR[Math.floor(nf * 0.2)] || 0.001;
+  const minR = Math.max(5 * floor, 0.01);
+  const runs = [];
+  let f = 0;
+  while (f < nf) {
+    if (!(rms[f] > minR && zc[f] > 1200 && zc[f] < 6000)) { f++; continue; }
+    let start = f, mean = zc[f], cnt = 1; f++;
+    while (f < nf && rms[f] > minR * 0.7 && Math.abs(zc[f] - mean) / mean < 0.12) { mean = (mean * cnt + zc[f]) / (cnt + 1); cnt++; f++; }
+    if (cnt >= 10) runs.push({ start: start / 100, end: f / 100, len: cnt });
+  }
+  if (!runs.length) return null;
+  // latest tone that still has a shot after it
+  const withShots = runs.filter(r => raw.some(s => s > r.end + 0.12));
+  if (withShots.length) return withShots[withShots.length - 1];
+  return runs.reduce((a, b) => b.len > a.len ? b : a);
+}
+
+function runDetection(){
+  if (S.demo || !S.env) return;
+  const raw = detectShotsRaw();
+  const b = S.mono ? detectBeep(raw) : null;
+  if (b) { S.beep = b.start; S.beepEnd = b.end; }
+  else { S.beep = raw.length ? Math.max(0, raw[0] - 1.5) : 0; S.beepEnd = S.beep; }
+  S.shots = raw.filter(s => s > S.beepEnd + 0.05 || (!b && s > S.beep));
+  S.sel = -1;
+  if (b && S.shots.length) msg(`Encontré el beep y ${S.shots.length} tiros. Revisá la lista: tocá una fila para ver ese tiro en el video.`, 'ok');
+  else if (!b) msg('No encontré el beep. Poné el video en el pitido y tocá "Beep acá" (tecla B).', 'warn');
+  else msg('Encontré el beep pero ningún tiro. Bajá la sensibilidad y volvé a detectar.', 'warn');
+  refresh();
+}
+
+// ---------- overlay ----------
+function overlayState(t){
+  const shots = sortedShots(), beep = S.beep;
+  const passed = shots.filter(s => s <= t);
+  const n = passed.length, last = shots[shots.length - 1];
+  let elapsed, label, final = false;
+  if (t < beep) { elapsed = 0; label = 'LISTO'; }
+  else if (shots.length && t >= last) { elapsed = last - beep; label = 'FINAL'; final = true; }
+  else { elapsed = t - beep; label = 'TIEMPO'; }
+  const lastShot = n ? passed[n - 1] : null;
+  const split = n >= 2 ? passed[n - 1] - passed[n - 2] : (n === 1 ? passed[0] - beep : null);
+  const flash = O.flash && lastShot != null && t - lastShot < 0.12;
+  return { elapsed, label, final, n, total: shots.length, split, flash, passed, beep };
+}
+
+function roundRect(c, x, y, w, h, r){ c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath(); }
+
+function drawOverlay(c, W, H, t){
+  const st = overlayState(t);
+  const u = Math.min(W, H) * 0.06 * O.size;
+  const pad = u * 0.42, m = u * 0.5, ORANGE = '#ff5a1f';
+  const bigF = `800 ${u * 1.55}px ${getMono()}`, lblF = `700 ${u * 0.42}px ${getDisplay()}`, subF = `700 ${u * 0.5}px ${getMono()}`;
+  c.save();
+  c.font = bigF; const bigW = c.measureText('00.00').width;
+  const timeTxt = st.elapsed.toFixed(2);
+  const pw = Math.max(bigW, c.measureText(timeTxt).width) + pad * 2 + u * 0.18;
+  const ph = u * 0.42 + u * 1.55 + u * 0.5 + pad * 2 + u * 0.3;
+  const right = O.pos[1] === 'r', bottom = O.pos[0] === 'b';
+  const px = right ? W - m - pw : m, py = bottom ? H - m - ph : m;
+  // panel
+  c.fillStyle = 'rgba(10,12,14,0.74)'; roundRect(c, px, py, pw, ph, u * 0.18); c.fill();
+  c.fillStyle = st.flash ? '#ffffff' : ORANGE; c.fillRect(px, py + u * 0.18, u * 0.14, ph - u * 0.36);
+  const x0 = px + pad + u * 0.18;
+  c.textBaseline = 'top';
+  c.font = lblF; c.fillStyle = st.final ? ORANGE : 'rgba(255,255,255,0.72)';
+  c.fillText(st.label, x0, py + pad);
+  if (st.total) { c.textAlign = 'right'; c.fillStyle = 'rgba(255,255,255,0.72)'; c.fillText(`TIRO ${st.n}/${st.total}`, px + pw - pad, py + pad); c.textAlign = 'left'; }
+  c.font = bigF; c.fillStyle = st.flash || st.final ? ORANGE : '#ffffff';
+  c.fillText(timeTxt, x0, py + pad + u * 0.55);
+  c.font = subF; c.fillStyle = 'rgba(255,255,255,0.85)';
+  const subTxt = st.split == null ? 'SPLIT  –' : (st.n === 1 ? `1ER TIRO  ${st.split.toFixed(2)}` : `SPLIT  ${st.split.toFixed(2)}`);
+  c.fillText(subTxt, x0, py + pad + u * 0.55 + u * 1.65);
+  // split list
+  if (O.list && st.n) {
+    const rows = st.passed.map((s, i) => [i + 1, i === 0 ? s - st.beep : s - st.passed[i - 1]]);
+    const maxRows = Math.max(3, Math.floor((H - ph - m * 3) / (u * 0.62)));
+    const vis = rows.slice(-Math.min(maxRows, 14));
+    const rh = u * 0.62, lw = u * 3.1, lh = vis.length * rh + pad;
+    const lx = right ? W - m - lw : m;
+    const ly = bottom ? py - m * 0.4 - lh : py + ph + m * 0.4;
+    c.fillStyle = 'rgba(10,12,14,0.6)'; roundRect(c, lx, ly, lw, lh, u * 0.14); c.fill();
+    c.font = `700 ${u * 0.46}px ${getMono()}`;
+    vis.forEach(([k, v], i) => {
+      const y = ly + pad / 2 + i * rh + (rh - u * 0.46) / 2;
+      const isLast = k === st.n;
+      c.fillStyle = 'rgba(255,255,255,0.5)'; c.textAlign = 'left'; c.fillText(String(k).padStart(2, ' '), lx + pad * 0.7, y);
+      c.fillStyle = isLast ? ORANGE : '#ffffff'; c.textAlign = 'right'; c.fillText(v.toFixed(2), lx + lw - pad * 0.7, y);
+    });
+    c.textAlign = 'left';
+  }
+  c.restore();
+}
+const getMono = () => '"JetBrains Mono", ui-monospace, Menlo, monospace';
+const getDisplay = () => '"Chakra Petch", "Arial Narrow", sans-serif';
+
+// ---------- stage render ----------
+function drawStage(){
+  const W = cv.width, H = cv.height, t = now();
+  if (S.demo) {
+    const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#1c2226'); g.addColorStop(1, '#0b0e10');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = 'rgba(255,255,255,0.04)'; ctx.lineWidth = 1;
+    for (let x = 0; x < W; x += 40) { ctx.beginPath(); ctx.moveTo(x + .5, 0); ctx.lineTo(x + .5, H); ctx.stroke(); }
+    for (let y = 0; y < H; y += 40) { ctx.beginPath(); ctx.moveTo(0, y + .5); ctx.lineTo(W, y + .5); ctx.stroke(); }
+    ctx.fillStyle = 'rgba(255,255,255,0.8)'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = `700 34px ${getDisplay()}`; ctx.fillText('TOCÁ ACÁ PARA ELEGIR UN VIDEO', W / 2, H / 2 + 60);
+    ctx.font = `500 20px ${getMono()}`; ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.fillText('así se van a ver los tiempos', W / 2, H / 2 + 100);
+    ctx.textAlign = 'left';
+  } else if (vid.readyState >= 2) {
+    ctx.drawImage(vid, 0, 0, W, H);
+  } else { ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); }
+  drawOverlay(ctx, W, H, t);
+}
+
+// ---------- timeline ----------
+function viewRange(){
+  const shots = sortedShots();
+  if (S.view === 'todo' || !shots.length) return [0, S.dur];
+  const a = Math.max(0, Math.min(S.beep, shots[0]) - 1), b = Math.min(S.dur, shots[shots.length - 1] + 1.5);
+  return b - a > 0.5 ? [a, b] : [0, S.dur];
+}
+function css(name){ return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+function drawTimeline(){
+  const dpr = window.devicePixelRatio || 1, w = tl.clientWidth, h = tl.clientHeight;
+  if (tl.width !== Math.round(w * dpr)) { tl.width = Math.round(w * dpr); tl.height = Math.round(h * dpr); }
+  const c = tctx; c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, w, h);
+  const [a, b] = viewRange(), span = b - a, X = t => (t - a) / span * w;
+  const env = S.env, wave = css('--wave'), hi = css('--wave-hi'), acc = css('--accent'), mut = css('--muted');
+  let max = 0; for (let i = 0; i < env.length; i++) if (env[i] > max) max = env[i];
+  const base = h - 16, amp = base - 14;
+  c.fillStyle = wave;
+  for (let px = 0; px < w; px++) {
+    const i0 = Math.floor((a + px / w * span) * 1000), i1 = Math.max(i0 + 1, Math.floor((a + (px + 1) / w * span) * 1000));
+    let m = 0; for (let i = i0; i < i1 && i < env.length; i++) if (env[i] > m) m = env[i];
+    const v = Math.sqrt(m / (max || 1)) * amp;
+    c.fillRect(px, base - v, 1, v);
+  }
+  // threshold
+  if (!S.demo) { const ty = base - Math.sqrt(+$('th').value / 100) * amp; c.strokeStyle = mut; c.setLineDash([3, 4]); c.beginPath(); c.moveTo(0, ty); c.lineTo(w, ty); c.stroke(); c.setLineDash([]); }
+  // time ticks
+  c.fillStyle = mut; c.font = `500 10px ${getMono()}`; c.textBaseline = 'alphabetic';
+  const step = span > 60 ? 10 : span > 20 ? 5 : span > 8 ? 1 : 0.5;
+  for (let t = Math.ceil(a / step) * step; t <= b; t += step) { const x = X(t); c.fillRect(x, base + 1, 1, 4); c.fillText(t.toFixed(step < 1 ? 1 : 0), x + 2, h - 3); }
+  // beep
+  const bx = X(S.beep); c.fillStyle = acc; c.fillRect(bx - 1, 0, 2, base);
+  c.font = `700 10px ${getDisplay()}`; c.fillText('BEEP', bx + 4, 11);
+  // shots
+  const shots = sortedShots();
+  shots.forEach((s, i) => {
+    const x = X(s); const sel = S.shots.indexOf(s) === S.sel;
+    c.fillStyle = sel ? acc : hi; c.fillRect(x - (sel ? 1 : .5), 14, sel ? 2 : 1, base - 14);
+    c.font = `700 10px ${getMono()}`; c.fillText(String(i + 1), x + 2, 24 + (i % 2) * 11);
+  });
+  // playhead
+  const tx = X(now()); c.fillStyle = hi; c.fillRect(tx - 1, 0, 2, h);
+  c.beginPath(); c.moveTo(tx - 5, 0); c.lineTo(tx + 5, 0); c.lineTo(tx, 6); c.closePath(); c.fill();
+}
+function seekFromTimeline(ev){
+  if (S.demo) return;
+  const r = tl.getBoundingClientRect(), [a, b] = viewRange();
+  const t = a + Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)) * (b - a);
+  vid.currentTime = Math.max(0, Math.min(S.dur, t));
+}
+let dragging = false;
+tl.addEventListener('pointerdown', e => { dragging = true; tl.setPointerCapture(e.pointerId); seekFromTimeline(e); });
+tl.addEventListener('pointermove', e => { if (dragging) seekFromTimeline(e); });
+tl.addEventListener('pointerup', () => dragging = false);
+
+// ---------- list + stats ----------
+function refresh(){
+  const shots = sortedShots(), tb = $('shotBody');
+  tb.innerHTML = '';
+  const bt = document.createElement('tr'); bt.className = 'beep';
+  bt.innerHTML = `<td class="num">B</td><td>0.00</td><td>beep</td><td class="act"><button data-a="bm" type="button">−.01</button> <button data-a="bp" type="button">+.01</button></td>`;
+  bt.addEventListener('click', e => { if (e.target.dataset.a) { S.beep = Math.max(0, S.beep + (e.target.dataset.a === 'bp' ? .01 : -.01)); refresh(); } else if (!S.demo) vid.currentTime = Math.max(0, S.beep - .3); });
+  tb.appendChild(bt);
+  shots.forEach((s, i) => {
+    const idx = S.shots.indexOf(s), tr = document.createElement('tr');
+    if (idx === S.sel) tr.className = 'sel';
+    const split = i ? s - shots[i - 1] : s - S.beep;
+    tr.innerHTML = `<td class="num">${i + 1}</td><td>${(s - S.beep).toFixed(2)}</td><td>${split.toFixed(2)}</td><td class="act"><button data-a="m" type="button">−.01</button> <button data-a="p" type="button">+.01</button> <button data-a="x" type="button" title="Borrar">✕</button></td>`;
+    tr.addEventListener('click', e => {
+      const a = e.target.dataset.a;
+      if (a === 'x') { S.shots.splice(idx, 1); S.sel = -1; }
+      else if (a === 'm' || a === 'p') { S.shots[idx] = Math.max(0, s + (a === 'p' ? .01 : -.01)); S.sel = idx; }
+      else { S.sel = idx; if (!S.demo) vid.currentTime = Math.max(0, s - 0.25); }
+      refresh();
+    });
+    tb.appendChild(tr);
+  });
+  const splits = shots.slice(1).map((s, i) => s - shots[i]);
+  $('stTotal').textContent = shots.length ? f2(shots[shots.length - 1] - S.beep) : '–';
+  $('stCount').textContent = shots.length || '0';
+  $('stDraw').textContent = shots.length ? f2(shots[0] - S.beep) : '–';
+  $('stBest').textContent = splits.length ? f2(Math.min(...splits)) : '–';
+  $('stAvg').textContent = splits.length ? f2(splits.reduce((a, b) => a + b, 0) / splits.length) : '–';
+  $('stBeep').textContent = f2(S.beep);
+  drawTimeline();
+  if (vid.paused) drawStage();
+}
+
+// ---------- loading ----------
+async function loadFile(file){
+  if (!file || !file.type.startsWith('video') && !/\.(mp4|mov|m4v|webm|mkv)$/i.test(file.name)) { msg('Ese archivo no parece un video. Probá con un .mp4 o .mov.', 'warn'); return; }
+  if (S.url) URL.revokeObjectURL(S.url);
+  S.url = URL.createObjectURL(file); S.name = file.name.replace(/\.[^.]+$/, '');
+  S.blob = null; $('saveBtn').hidden = true;
+  vid.src = S.url; vid.load();
+  await new Promise((res, rej) => { vid.onloadedmetadata = res; vid.onerror = () => rej(new Error('video')); }).catch(() => { msg('El navegador no puede abrir este video. Probá exportarlo como .mp4 (H.264).', 'warn'); throw 0; });
+  S.demo = false; $('demoBadge').hidden = true; $('statusLbl').textContent = file.name;
+  S.dur = vid.duration;
+  setCanvasSize(+$('res').value);
+  ['playBtn','backBtn','fwdBtn','beepHere','shotHere','redetect','exportBtn'].forEach(id => $(id).disabled = false);
+  vid.currentTime = 0;
+  try { await analyze(file); runDetection(); }
+  catch (e) {
+    S.env = new Float32Array(Math.ceil(S.dur * 1000)); S.mono = null; S.shots = []; S.beep = 0;
+    msg('No pude leer el audio de este archivo. Podés marcar el beep y los tiros a mano con B y S, o convertir el video a .mp4.', 'warn'); refresh();
+  }
+}
+function setCanvasSize(cap){
+  const vw = vid.videoWidth || 1280, vh = vid.videoHeight || 720;
+  let k = 1; if (cap && Math.max(vw, vh) > cap) k = cap / Math.max(vw, vh);
+  cv.width = Math.round(vw * k / 2) * 2; cv.height = Math.round(vh * k / 2) * 2;
+}
+$('loadBtn').onclick = () => $('file').click();
+$('file').onchange = e => { const f = e.target.files[0]; if (f) loadFile(f).catch(() => {}); e.target.value = ''; };
+const stage = $('stage');
+stage.addEventListener('dragover', e => { e.preventDefault(); stage.classList.add('drag'); });
+stage.addEventListener('dragleave', () => stage.classList.remove('drag'));
+stage.addEventListener('drop', e => { e.preventDefault(); stage.classList.remove('drag'); const f = e.dataTransfer.files[0]; if (f) loadFile(f).catch(() => {}); });
+stage.addEventListener('click', () => { if (S.demo) $('file').click(); else togglePlay(); });
+
+// ---------- audio routing (for playback + export) ----------
+let AC = null, srcNode = null, recDest = null;
+function ensureAudio(){
+  if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
+  const C = window.AudioContext || window.webkitAudioContext;
+  AC = new C(); srcNode = AC.createMediaElementSource(vid); recDest = AC.createMediaStreamDestination();
+  srcNode.connect(AC.destination); srcNode.connect(recDest);
+}
+
+// ---------- transport ----------
+function togglePlay(){
+  if (S.demo || S.exporting) return;
+  ensureAudio();
+  if (vid.paused) vid.play(); else vid.pause();
+}
+vid.onplay = () => $('playBtn').textContent = '❚❚ Pausa';
+vid.onpause = () => { $('playBtn').textContent = '▶ Play'; drawStage(); drawTimeline(); };
+vid.onseeked = () => { drawStage(); drawTimeline(); };
+$('playBtn').onclick = togglePlay;
+const step = d => { if (S.demo || S.exporting) return; vid.pause(); vid.currentTime = Math.max(0, Math.min(S.dur, vid.currentTime + d / FPS)); };
+$('backBtn').onclick = () => step(-1);
+$('fwdBtn').onclick = () => step(1);
+function addShotHere(){ if (S.demo) return; const t = vid.currentTime; S.shots.push(t); S.sel = S.shots.length - 1; msg(`Tiro agregado en ${(t - S.beep).toFixed(2)}.`); refresh(); }
+function beepHere(){ if (S.demo) return; S.beep = vid.currentTime; S.beepEnd = S.beep; msg(`Beep marcado. Los tiempos ahora cuentan desde ${S.beep.toFixed(2)} s del video.`, 'ok'); refresh(); }
+$('shotHere').onclick = addShotHere;
+$('beepHere').onclick = beepHere;
+document.addEventListener('keydown', e => {
+  if (/INPUT|SELECT|TEXTAREA/.test(e.target.tagName) && e.target.type !== 'checkbox') return;
+  if (e.key === ' ') { e.preventDefault(); togglePlay(); }
+  else if (e.key === 'ArrowLeft') { e.preventDefault(); step(-1); }
+  else if (e.key === 'ArrowRight') { e.preventDefault(); step(1); }
+  else if (e.key === 's' || e.key === 'S') addShotHere();
+  else if (e.key === 'b' || e.key === 'B') beepHere();
+  else if ((e.key === 'Delete' || e.key === 'Backspace') && S.sel >= 0) { e.preventDefault(); S.shots.splice(S.sel, 1); S.sel = -1; refresh(); }
+});
+
+// ---------- controls ----------
+$('th').oninput = e => { $('thOut').textContent = e.target.value + '%'; drawTimeline(); };
+$('gap').oninput = e => { $('gapOut').textContent = e.target.value + ' ms'; };
+$('th').onchange = $('gap').onchange = () => runDetection();
+$('redetect').onclick = runDetection;
+$('size').oninput = e => { O.size = e.target.value / 100; $('sizeOut').textContent = e.target.value + '%'; drawStage(); };
+$('optList').onchange = e => { O.list = e.target.checked; drawStage(); };
+$('optFlash').onchange = e => { O.flash = e.target.checked; };
+$('res').onchange = e => { if (!S.demo) { setCanvasSize(+e.target.value); drawStage(); } };
+document.querySelectorAll('#posSeg button').forEach(b => b.onclick = () => {
+  O.pos = b.dataset.p; document.querySelectorAll('#posSeg button').forEach(x => x.setAttribute('aria-pressed', x === b)); drawStage();
+});
+document.querySelectorAll('#viewSeg button').forEach(b => b.onclick = () => {
+  S.view = b.dataset.v; document.querySelectorAll('#viewSeg button').forEach(x => x.setAttribute('aria-pressed', x === b)); drawTimeline();
+});
+
+// ---------- export ----------
+let recorder = null, chunks = [];
+function pickMime(){
+  const opts = ['video/mp4;codecs=avc1.640028,mp4a.40.2', 'video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'];
+  return opts.find(m => window.MediaRecorder && MediaRecorder.isTypeSupported(m)) || '';
+}
+let wake = null;
+async function startExport(){
+  if (S.demo || S.exporting) return;
+  if (!window.MediaRecorder || !cv.captureStream) { msg('Este navegador no puede grabar video. En iPhone usá Safari actualizado; en Android, Chrome.', 'warn'); return; }
+  ensureAudio();
+  const shots = sortedShots();
+  const trim = $('optTrim').checked && shots.length;
+  S.exportStart = trim ? Math.max(0, S.beep - 2) : 0;
+  S.exportEnd = trim ? Math.min(S.dur, shots[shots.length - 1] + 2) : S.dur;
+  const mime = pickMime(); S.ext = mime.includes('mp4') ? 'mp4' : 'webm';
+  const stream = cv.captureStream(FPS);
+  recDest.stream.getAudioTracks().forEach(t => stream.addTrack(t));
+  chunks = [];
+  try { recorder = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 8e6, audioBitsPerSecond: 160e3 } : undefined); }
+  catch (e) { recorder = new MediaRecorder(stream); S.ext = (recorder.mimeType || '').includes('mp4') ? 'mp4' : 'webm'; }
+  recorder.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+  recorder.onstop = () => {
+    S.blob = new Blob(chunks, { type: recorder.mimeType || mime || 'video/webm' });
+    S.exporting = false; setExportUI(false);
+    if (wake) { try { wake.release(); } catch (e) {} wake = null; }
+    $('saveBtn').hidden = false; $('saveBtn').textContent = `Guardar video (.${S.ext}, ${(S.blob.size / 1048576).toFixed(1)} MB)`;
+    msg('Listo. Tocá "Guardar video" para bajarlo.', 'ok');
+  };
+  S.exporting = true; setExportUI(true);
+  // seek and play inside the tap so phones allow playback with sound
+  vid.pause(); vid.currentTime = S.exportStart;
+  const seeked = new Promise(r => vid.addEventListener('seeked', r, { once: true }));
+  const playing = vid.play().catch(() => {});
+  if (navigator.wakeLock) navigator.wakeLock.request('screen').then(w => wake = w).catch(() => {});
+  await Promise.all([seeked, playing]);
+  if (recorder.state === 'inactive') recorder.start(500);
+}
+function setExportUI(on){
+  $('exportBtn').disabled = on; $('exportBtn').textContent = on ? 'Grabando…' : 'Grabar video con tiempos';
+  $('bar').hidden = !on; $('barFill').style.width = '0%';
+  ['playBtn','backBtn','fwdBtn','beepHere','shotHere','redetect','loadBtn'].forEach(id => $(id).disabled = on);
+  if (on) msg('Grabando en tiempo real… dejá la pantalla prendida y no cambies de app.');
+}
+function stopExport(){ if (!S.exporting) return; vid.pause(); if (recorder && recorder.state !== 'inactive') recorder.stop(); }
+vid.onended = () => stopExport();
+$('exportBtn').onclick = startExport;
+
+let dl = null;
+(async () => { try { dl = window.claude && window.claude.use ? await window.claude.use('downloads') : null; } catch (e) { dl = null; } })();
+$('saveBtn').onclick = async () => {
+  if (!S.blob) return;
+  const filename = `${S.name}-tiempos.${S.ext}`;
+  if (dl) {
+    try { await dl.save({ filename, data: S.blob }); msg('Video guardado.', 'ok'); return; }
+    catch (e) { if (e && e.code === 'declined') { msg('Guardado cancelado.'); return; } if (e && e.code === 'rate_limited') { msg('Ya hay una ventana de guardado abierta.'); return; } }
+  }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(S.blob); a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+};
+
+// ---------- loop ----------
+function loop(){
+  if (S.demo) { demoT = ((performance.now() - demoStart) / 1000) % S.dur; drawStage(); drawTimeline(); }
+  else if (!vid.paused) {
+    drawStage(); drawTimeline();
+    const t = vid.currentTime;
+    $('readout').innerHTML = `${Math.max(0, t - S.beep).toFixed(2)} <small>/ ${t.toFixed(2)} s</small>`;
+    if (S.exporting) {
+      $('barFill').style.width = Math.min(100, (t - S.exportStart) / (S.exportEnd - S.exportStart) * 100) + '%';
+      if (t >= S.exportEnd) stopExport();
+    }
+  } else {
+    const t = vid.currentTime;
+    $('readout').innerHTML = `${Math.max(0, t - S.beep).toFixed(2)} <small>/ ${t.toFixed(2)} s</small>`;
+  }
+  requestAnimationFrame(loop);
+}
+window.addEventListener('resize', drawTimeline);
+if (document.fonts && document.fonts.load) Promise.all([document.fonts.load('800 40px "JetBrains Mono"'), document.fonts.load('700 20px "Chakra Petch"')]).then(() => refresh()).catch(() => {});
+refresh();
+requestAnimationFrame(loop);
+})();
+</script>
+
+<script>
+(() => {
+  const tabs = document.querySelectorAll('.tabs button');
+  tabs.forEach(b => b.addEventListener('click', () => {
+    tabs.forEach(x => { const on = x === b; x.setAttribute('aria-selected', on); document.getElementById(x.dataset.tab).hidden = !on; });
+    if (window.matchMedia('(max-width:899px)').matches) document.getElementById(b.dataset.tab).scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }));
+})();
+</script>
+<script>if("serviceWorker" in navigator){addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}))}</script></body></html>
