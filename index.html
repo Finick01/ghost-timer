@@ -89,7 +89,7 @@ input[type=range]{width:100%;accent-color:var(--accent);height:32px}
 .stat{background:var(--panel);padding:9px 10px;display:flex;flex-direction:column;gap:2px;min-width:0}
 .stat b{font-family:var(--mono);font-size:19px;font-weight:800;font-variant-numeric:tabular-nums}
 .stat.hero b{color:var(--accent)}
-.shots{max-height:none;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.shots{max-height:none;border:1px solid var(--line);border-radius:10px;overflow-x:auto}
 @media (min-width:900px){.shots{max-height:340px;overflow:auto}}
 table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
 th{position:sticky;top:0;background:var(--panel-2);font-family:var(--display);font-weight:600;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);text-align:left;padding:7px 8px}
@@ -98,8 +98,10 @@ tr.sel td{background:var(--accent-soft)}
 tr.beep td{color:var(--accent)}
 td.num{color:var(--muted);width:30px}
 td.act{text-align:right;white-space:nowrap}
-td.act button{font-family:var(--mono);font-size:12px;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:7px;min-width:38px;min-height:34px;padding:2px 6px;cursor:pointer;touch-action:manipulation}
-td.act button + button{margin-left:4px}
+td.act button{font-family:var(--mono);font-size:11.5px;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:7px;min-width:32px;min-height:34px;padding:2px 4px;cursor:pointer;touch-action:manipulation}
+td.act button + button{margin-left:3px}
+td.act button[data-a="f"]{color:var(--accent);border-color:var(--accent)}
+@media (max-width:420px){td{padding:5px 5px;font-size:13px}th{padding:7px 5px}}
 tbody tr{cursor:pointer}
 .check{display:flex;align-items:center;gap:10px;font-size:14px;min-height:36px}
 .check input{accent-color:var(--accent);width:20px;height:20px;flex:none}
@@ -180,11 +182,11 @@ select{font-family:var(--body);font-size:15px;min-height:44px;padding:6px 10px;b
         <div class="field">
           <div class="row"><label class="label" for="th">Sensibilidad</label><output id="thOut">40%</output></div>
           <input type="range" id="th" min="10" max="90" value="40">
-          <p class="hint">Más bajo detecta más tiros. Si aparecen tiros de la pista de al lado, subilo.</p>
+          <p class="hint">Más bajo detecta más tiros (también los más débiles). Si aparecen tiros de la pista de al lado, subilo.</p>
         </div>
         <div class="field">
-          <div class="row"><label class="label" for="gap">Separación mínima</label><output id="gapOut">90 ms</output></div>
-          <input type="range" id="gap" min="40" max="300" step="5" value="90">
+          <div class="row"><label class="label" for="gap">Separación mínima</label><output id="gapOut">70 ms</output></div>
+          <input type="range" id="gap" min="40" max="300" step="5" value="70">
           <p class="hint">Evita contar el eco como otro tiro.</p>
         </div>
         <button class="btn" id="redetect" type="button" disabled>Volver a detectar</button>
@@ -221,7 +223,7 @@ select{font-family:var(--body);font-size:15px;min-height:44px;padding:6px 10px;b
         <div class="stack">
           <button class="btn primary" id="exportBtn" type="button" disabled>Grabar video con tiempos</button>
           <div class="bar" id="bar" hidden><i id="barFill"></i></div>
-          <p class="hint" id="exportHint">Versión 11 · La grabación corre en tiempo real. Dejá la pantalla prendida y no cambies de app mientras graba.</p>
+          <p class="hint" id="exportHint">Versión 14 · La grabación corre en tiempo real. Dejá la pantalla prendida y no cambies de app mientras graba.</p>
           <button class="btn dark" id="saveBtn" type="button" hidden>Guardar video</button>
         </div>
       </section>
@@ -284,78 +286,159 @@ async function analyze(file){
   const mono = new Float32Array(len);
   for (let i = 0; i < len; i++) { let m = 0; for (const ch of chs) { const v = ch[i]; if (Math.abs(v) > Math.abs(m)) m = v; } mono[i] = m; }
   S.mono = mono; S.sr = sr; S.audioBuf = ab;
-  const hop = Math.max(1, Math.round(sr / 1000)), n = Math.floor(len / hop), env = new Float32Array(n);
-  for (let i = 0; i < n; i++) { let m = 0; const o = i * hop; for (let j = 0; j < hop; j++) { const a = Math.abs(mono[o + j]); if (a > m) m = a; } env[i] = m; }
+  const n = Math.floor(len * 1000 / sr), env = new Float32Array(n);
+  for (let i = 0; i < n; i++) { let m = 0; const o = Math.floor(i * sr / 1000), e = Math.min(len, Math.floor((i + 1) * sr / 1000)); for (let j = o; j < e; j++) { const a = Math.abs(mono[j]); if (a > m) m = a; } env[i] = m; }
   S.env = env;
 }
 
-function detectShotsRaw(){
-  const env = S.env, n = env.length, th = +$('th').value / 100, gap = +$('gap').value;
-  let max = 0; for (let i = 0; i < n; i++) if (env[i] > max) max = env[i];
-  const thr = th * max, out = []; let last = -1e9;
-  for (let i = 20; i < n; i++) {
-    if (env[i] < thr || i - last < gap) continue;
-    let bg = 0, c = 0;
-    for (let j = Math.max(0, i - 70); j < i - 12; j++) { bg += env[j]; c++; }
-    bg = c ? bg / c : 0;
-    if (env[i] > 2.5 * bg) {
-      let k = i; while (k > i - 6 && env[k - 1] > 0.3 * env[i]) k--;
-      out.push(k / 1000); last = i;
+// ---------- detection v2 (calibrated on real IPSC videos) ----------
+// 4th-order Butterworth high-pass (two biquads): removes voices, wind and handling noise.
+function highpass(x, sr, fc){
+  let y = x;
+  for (const Q of [0.5411961, 1.3065630]) {
+    const w0 = 2 * Math.PI * fc / sr, cs = Math.cos(w0), al = Math.sin(w0) / (2 * Q), a0 = 1 + al;
+    const b0 = (1 + cs) / 2 / a0, b1 = -(1 + cs) / a0, b2 = b0, a1 = -2 * cs / a0, a2 = (1 - al) / a0;
+    const out = new Float32Array(y.length); let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+    for (let i = 0; i < y.length; i++) { const v = y[i], o = b0 * v + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2; out[i] = o; x2 = x1; x1 = v; y2 = y1; y1 = o; }
+    y = out;
+  }
+  return y;
+}
+function pctl(arr, p){
+  const a = Array.from(arr).sort((u, v) => u - v); if (!a.length) return 0;
+  const r = (a.length - 1) * p / 100, lo = Math.floor(r), hi = Math.ceil(r);
+  return a[lo] + (a[hi] - a[lo]) * (r - lo);
+}
+function shotClusters(){
+  const sr = S.sr, hop = Math.round(sr / 1000), y = highpass(S.mono, sr, 900), n = Math.floor(y.length / hop);
+  const toT = i => i * hop / sr, toI = t => Math.round(t * sr / hop);
+  const db = new Float32Array(n), pw = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    let m = 0, s = 0; const o = i * hop;
+    for (let j = 0; j < hop; j++) { const v = y[o + j], a = Math.abs(v); if (a > m) m = a; s += v * v; }
+    db[i] = 20 * Math.log10(m + 1e-6); pw[i] = 10 * Math.log10(s / hop + 1e-12);
+  }
+  const mean = (arr, a, b) => { a = Math.max(0, a); b = Math.min(arr.length, b); if (b <= a) return NaN; let s = 0; for (let i = a; i < b; i++) s += arr[i]; return s / (b - a); };
+  const cands = [];
+  for (let i = 30; i < n - 60; i++) {
+    let mn = Infinity; for (let j = i - 12; j < i - 2; j++) if (db[j] < mn) mn = db[j];
+    if (db[i] - mn < 12 || db[i] - mean(db, i - 30, i - 2) < 6) continue;
+    let k = i; while (k > i - 4 && db[k - 1] > db[i] - 6) k--;
+    const E = mean(pw, i, i + 40), Eb = mean(pw, i - 40, i - 2);
+    cands.push({ t: toT(k), E, dE: E - (isNaN(Eb) ? E - 20 : Eb) });
+    i += 24;
+  }
+  // one gunshot can trigger several candidates within a few ms: merge them and find the real onset
+  const groups = [];
+  for (const c of cands) { const g = groups[groups.length - 1]; if (g && c.t - g.t0 < 0.045) g.m.push(c); else groups.push({ t0: c.t, m: [c] }); }
+  return groups.map(g => {
+    const a = Math.max(0, toI(g.t0) - 10), b = Math.min(n, toI(g.t0) + 50);
+    let P = -Infinity, ip = a; for (let i = a; i < b; i++) if (db[i] > P) { P = db[i]; ip = i; }
+    // first ms that reaches within 10 dB of the peak, then walk back over the contiguous loud start (max 25 ms)
+    let on = a; while (on < ip && db[on] < P - 10) on++;
+    const lim = Math.max(0, toI(g.t0) - 25);
+    while (on > lim && db[on - 1] >= P - 14 && db[on - 1] < db[on] + 1) on--;
+    return { t: toT(on), E: Math.max(...g.m.map(c => c.E)), dE: Math.max(...g.m.map(c => c.dE)) };
+  });
+}
+function fftMag(re, im){ // in-place radix-2 FFT, returns nothing (re/im overwritten)
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) { let bit = n >> 1; for (; j & bit; bit >>= 1) j ^= bit; j ^= bit; if (i < j) { [re[i], re[j]] = [re[j], re[i]]; [im[i], im[j]] = [im[j], im[i]]; } }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = -2 * Math.PI / len, wr = Math.cos(ang), wi = Math.sin(ang);
+    for (let i = 0; i < n; i += len) {
+      let cr = 1, ci = 0;
+      for (let j = 0; j < len / 2; j++) {
+        const ar = re[i + j], ai = im[i + j], br = re[i + j + len / 2] * cr - im[i + j + len / 2] * ci, bi = re[i + j + len / 2] * ci + im[i + j + len / 2] * cr;
+        re[i + j] = ar + br; im[i + j] = ai + bi; re[i + j + len / 2] = ar - br; im[i + j + len / 2] = ai - bi;
+        const t = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = t;
+      }
     }
   }
-  return out;
 }
-
-function detectBeep(raw){
-  const x = S.mono, sr = S.sr, hop = Math.round(sr / 100), nf = Math.floor(x.length / hop);
-  const rms = new Float32Array(nf), zc = new Float32Array(nf);
+// The timer beep is a steady tone (e.g. 1450 Hz + harmonics): look for a strong, stable spectral peak.
+function toneRuns(){
+  const x = S.mono, sr = S.sr, hop = Math.round(sr / 100), N = sr >= 44100 ? 2048 : 1024;
+  const nf = Math.floor((x.length - N) / hop), lo = Math.ceil(1100 * N / sr), hi = Math.floor(5000 * N / sr);
+  const win = new Float32Array(N); for (let i = 0; i < N; i++) win[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (N - 1));
+  const pk = new Float32Array(nf), ton = new Float32Array(nf), re = new Float32Array(N), im = new Float32Array(N), mag = new Float32Array(hi - lo + 1);
   for (let f = 0; f < nf; f++) {
-    let s = 0, z = 0; const o = f * hop;
-    for (let j = 0; j < hop; j++) { const v = x[o + j]; s += v * v; if (j && ((v >= 0) !== (x[o + j - 1] >= 0))) z++; }
-    rms[f] = Math.sqrt(s / hop); zc[f] = z * 100 / 2; // Hz approx
+    const o = f * hop; for (let i = 0; i < N; i++) { re[i] = x[o + i] * win[i]; im[i] = 0; }
+    fftMag(re, im);
+    let best = 0, bj = 0;
+    for (let j = lo; j <= hi; j++) { const m = Math.hypot(re[j], im[j]) + 1e-9; mag[j - lo] = m; if (m > best) { best = m; bj = j; } }
+    const sorted = Array.from(mag).sort((a, b) => a - b), med = sorted[Math.floor(sorted.length / 2)];
+    pk[f] = bj * sr / N; ton[f] = 20 * Math.log10(best / med);
   }
-  const sortedR = Array.from(rms).sort((a, b) => a - b);
-  const floor = sortedR[Math.floor(nf * 0.2)] || 0.001;
-  const minR = Math.max(5 * floor, 0.01);
-  const runs = [];
-  let f = 0;
+  const runs = []; let f = 0;
   while (f < nf) {
-    if (!(rms[f] > minR && zc[f] > 1200 && zc[f] < 6000)) { f++; continue; }
-    let start = f, mean = zc[f], cnt = 1; f++;
-    while (f < nf && rms[f] > minR * 0.7 && Math.abs(zc[f] - mean) / mean < 0.12) { mean = (mean * cnt + zc[f]) / (cnt + 1); cnt++; f++; }
-    if (cnt >= 10) runs.push({ start: start / 100, end: f / 100, len: cnt });
+    if (ton[f] < 18) { f++; continue; }
+    const st = f, fr = pk[f]; let tsum = ton[f], c = 1; f++;
+    while (f < nf && ton[f] >= 12 && Math.abs(pk[f] - fr) / fr < 0.04) { tsum += ton[f]; c++; f++; }
+    if (c >= 12) runs.push({ start: st / 100, end: f / 100, freq: pctl(pk.subarray(st, f), 50), ton: tsum / c });
   }
-  if (!runs.length) return null;
-  // latest tone that still has a shot after it
-  const withShots = runs.filter(r => raw.some(s => s > r.end + 0.12));
-  if (withShots.length) return withShots[withShots.length - 1];
-  return runs.reduce((a, b) => b.len > a.len ? b : a);
+  const merged = [];
+  for (const r of runs) { const m = merged[merged.length - 1]; if (m && r.start - m.end < 0.08 && Math.abs(r.freq - m.freq) / r.freq < 0.05) m.end = r.end; else merged.push(r); }
+  return merged;
 }
-
-// The tone search works in 10 ms frames; find the exact millisecond where the beep starts.
-function refineBeepStart(b){
-  const env = S.env; if (!env) return b.start;
-  const i0 = Math.round(b.start * 1000), i1 = Math.round(b.end * 1000);
-  const body = []; for (let i = i0 + 30; i < Math.max(i0 + 31, i1 - 20) && i < env.length; i++) body.push(env[i]);
-  if (!body.length) return b.start;
-  body.sort((x, y) => x - y);
-  const med = body[Math.floor(body.length / 2)], thr = 0.5 * med;
-  for (let i = Math.max(0, i0 - 40); i < Math.min(env.length - 6, i0 + 40); i++) {
-    if (env[i] >= thr && env[i + 2] >= 0.35 * med && env[i + 5] >= 0.35 * med) return i / 1000;
+// exact start of the tone, to the millisecond (Goertzel at the beep frequency)
+function refineBeep(r){
+  const x = S.mono, sr = S.sr, n = Math.round(sr * 0.005), hop = Math.round(sr / 1000);
+  const a = Math.max(0, Math.round((r.start - 0.08) * sr)), b = Math.min(x.length - n, Math.round(r.end * sr));
+  const cw = new Float32Array(n), sw = new Float32Array(n);
+  for (let i = 0; i < n; i++) { const w = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (n - 1)), ph = 2 * Math.PI * r.freq * i / sr; cw[i] = Math.cos(ph) * w; sw[i] = Math.sin(ph) * w; }
+  const g = [];
+  for (let o = a; o < b; o += hop) { let c = 0, s = 0; for (let i = 0; i < n; i++) { c += x[o + i] * cw[i]; s += x[o + i] * sw[i]; } g.push(Math.hypot(c, s)); }
+  const body = g.length > 150 ? g.slice(100) : g, med = pctl(body, 50);
+  for (let i = 0; i < g.length; i++) if (g[i] >= 0.5 * med) return (a + i * hop + n / 2) / sr;
+  return r.start;
+}
+// echoes come back after the same delay every time: find that delay and drop the weaker "shots" that follow it
+function dropEchoes(acc){
+  const lags = [];
+  for (let i = 0; i < acc.length; i++) for (let j = i + 1; j < acc.length; j++) { const L = acc[j].t - acc[i].t; if (L > 0.25) break; if (L >= 0.05 && acc[j].dE < acc[i].dE - 10) lags.push(L); }
+  if (lags.length < 3) return acc;
+  let best = 0, bc = 0;
+  for (const L of lags) { const near = lags.filter(v => Math.abs(v - L) <= 0.012); if (near.length > bc) { bc = near.length; best = pctl(near, 50); } }
+  if (bc < Math.max(4, 0.25 * acc.length)) return acc;
+  const drop = new Set(), keep = [];
+  for (let i = 0; i < acc.length; i++) {
+    if (drop.has(i)) continue; keep.push(acc[i]);
+    for (let j = i + 1; j < acc.length; j++) { const L = acc[j].t - acc[i].t; if (L > 0.25) break; if (Math.abs(L - best) <= 0.025 && acc[j].dE < acc[i].dE - 10) drop.add(j); }
   }
-  return b.start;
+  return keep;
+}
+function detectAll(){
+  const forced = S.forcedBeep;
+  const sens = Math.min(1, Math.max(0, (90 - +$('th').value) / 100)), gap = +$('gap').value / 1000;
+  const cl = shotClusters();
+  if (!cl.length) return { beep: S.forcedBeep != null ? { t: S.forcedBeep, end: S.forcedBeep } : null, shots: [] };
+  const refAll = pctl(cl.map(c => c.E), 95), loud = cl.filter(c => c.E >= refAll - 10).map(c => c.t);
+  const good = toneRuns().filter(r => r.end - r.start >= 0.2 && loud.some(t => t > r.end + 0.3 && t < r.end + 6));
+  let beep = null;
+  if (forced != null) beep = { t: forced, end: forced };
+  else if (good.length) { const r = good.reduce((p, q) => (q.ton + 10 * Math.log10(q.end - q.start)) > (p.ton + 10 * Math.log10(p.end - p.start)) ? q : p); beep = { t: refineBeep(r), end: r.end }; }
+  const after = cl.filter(c => !beep || c.t > beep.t + 0.08);
+  if (!after.length) return { beep, shots: [] };
+  const ref = pctl(after.map(c => c.E), 95), D = 4 + 12 * sens, acc = [];
+  for (const c of after) {
+    if (c.E < ref - D || c.dE < 4) continue;
+    if (acc.length && c.t - acc[acc.length - 1].t < gap) continue;
+    acc.push(c);
+  }
+  return { beep, shots: dropEchoes(acc).map(c => c.t) };
 }
 function runDetection(){
   if (S.demo || !S.env) return;
-  const raw = detectShotsRaw();
-  const b = S.mono ? detectBeep(raw) : null;
-  if (b) { S.beep = refineBeepStart(b); S.beepEnd = b.end; }
-  else { S.beep = raw.length ? Math.max(0, raw[0] - 1.5) : 0; S.beepEnd = S.beep; }
-  S.shots = raw.filter(s => s > S.beepEnd + 0.05 || (!b && s > S.beep));
+  if (!S.mono) { msg('No pude leer el audio. Marcá el beep y los tiros a mano con B y S.', 'warn'); refresh(); return; }
+  const r = detectAll();
+  if (r.beep) { S.beep = r.beep.t; S.beepEnd = r.beep.end; }
+  else { S.beep = r.shots.length ? Math.max(0, r.shots[0] - 1.5) : 0; S.beepEnd = S.beep; }
+  S.shots = r.shots;
   S.sel = -1;
-  if (b && S.shots.length) msg(`Encontré el beep y ${S.shots.length} tiros. Revisá la lista: tocá una fila para ver ese tiro en el video.`, 'ok');
-  else if (!b) msg('No encontré el beep. Poné el video en el pitido y tocá "Beep acá" (tecla B).', 'warn');
-  else msg('Encontré el beep pero ningún tiro. Bajá la sensibilidad y volvé a detectar.', 'warn');
+  if (r.beep && S.shots.length) msg(`Encontré el beep y ${S.shots.length} tiros. Revisá la lista: tocá una fila para ver ese tiro en el video.`, 'ok');
+  else if (!r.beep) msg('No encontré el beep. Poné el video en el pitido y tocá "Beep acá" (tecla B).', 'warn');
+  else msg('Encontré el beep pero ningún tiro. Subí la sensibilidad y volvé a detectar.', 'warn');
   refresh();
 }
 
@@ -482,7 +565,6 @@ function drawTimeline(){
     c.fillRect(px, base - v, 1, v);
   }
   // threshold
-  if (!S.demo) { const ty = base - Math.sqrt(+$('th').value / 100) * amp; c.strokeStyle = mut; c.setLineDash([3, 4]); c.beginPath(); c.moveTo(0, ty); c.lineTo(w, ty); c.stroke(); c.setLineDash([]); }
   // time ticks
   c.fillStyle = mut; c.font = `500 10px ${getMono()}`; c.textBaseline = 'alphabetic';
   const step = span > 60 ? 10 : span > 20 ? 5 : span > 8 ? 1 : 0.5;
@@ -539,10 +621,11 @@ function refresh(){
     const idx = S.shots.indexOf(s), tr = document.createElement('tr');
     if (idx === S.sel) tr.className = 'sel';
     const split = i ? s - shots[i - 1] : s - S.beep;
-    tr.innerHTML = `<td class="num">${i + 1}</td><td>${(s - S.beep).toFixed(2)}</td><td>${split.toFixed(2)}</td><td class="act"><button data-a="m" type="button">−.01</button> <button data-a="p" type="button">+.01</button> <button data-a="x" type="button" title="Borrar">✕</button></td>`;
+    tr.innerHTML = `<td class="num">${i + 1}</td><td>${(s - S.beep).toFixed(2)}</td><td>${split.toFixed(2)}</td><td class="act"><button data-a="m" type="button">−.01</button> <button data-a="p" type="button">+.01</button> <button data-a="x" type="button" title="Borrar este tiro">✕</button><button data-a="f" type="button" title="Este es el último tiro: borrar los que siguen">Fin</button></td>`;
     tr.addEventListener('click', e => {
       const a = e.target.dataset.a;
       if (a === 'x') { S.shots.splice(idx, 1); S.sel = -1; }
+      else if (a === 'f') { const n0 = S.shots.length; S.shots = S.shots.filter(v => v <= s); S.sel = -1; msg(n0 - S.shots.length ? `Listo: el tiro ${i + 1} es el último. Borré ${n0 - S.shots.length} tiros que venían después.` : 'Este ya es el último tiro.', 'ok'); }
       else if (a === 'm' || a === 'p') { S.shots[idx] = Math.max(0, s + (a === 'p' ? .01 : -.01)); S.sel = idx; }
       else { S.sel = idx; if (!S.demo) vid.currentTime = Math.max(0, s - 0.25); }
       refresh();
@@ -569,7 +652,7 @@ async function loadFile(file){
   S.blob = null; $('saveBtn').hidden = true;
   vid.src = S.url; vid.load();
   await new Promise((res, rej) => { vid.onloadedmetadata = res; vid.onerror = () => rej(new Error('video')); }).catch(() => { msg('El navegador no puede abrir este video. Probá exportarlo como .mp4 (H.264).', 'warn'); throw 0; });
-  S.demo = false; $('demoBadge').hidden = true; $('statusLbl').textContent = file.name;
+  S.demo = false; S.forcedBeep = null; $('demoBadge').hidden = true; $('statusLbl').textContent = file.name;
   S.dur = vid.duration;
   setCanvasSize(+$('res').value);
   ['playBtn','backBtn','fwdBtn','beepHere','shotHere','redetect','exportBtn'].forEach(id => $(id).disabled = false);
@@ -616,7 +699,12 @@ const step = d => { if (S.demo || S.exporting) return; vid.pause(); vid.currentT
 $('backBtn').onclick = () => step(-1);
 $('fwdBtn').onclick = () => step(1);
 function addShotHere(){ if (S.demo) return; const t = vid.currentTime; S.shots.push(t); S.sel = S.shots.length - 1; msg(`Tiro agregado en ${(t - S.beep).toFixed(2)}.`); refresh(); }
-function beepHere(){ if (S.demo) return; S.beep = vid.currentTime; S.beepEnd = S.beep; msg(`Beep marcado. Los tiempos ahora cuentan desde ${S.beep.toFixed(2)} s del video.`, 'ok'); refresh(); }
+function beepHere(){
+  if (S.demo) return;
+  S.forcedBeep = vid.currentTime;
+  runDetection();
+  msg(`Beep marcado en ${S.forcedBeep.toFixed(2)} s del video. Volví a buscar los tiros desde ahí: ${S.shots.length} tiros.`, 'ok');
+}
 $('shotHere').onclick = addShotHere;
 $('beepHere').onclick = beepHere;
 document.addEventListener('keydown', e => {
