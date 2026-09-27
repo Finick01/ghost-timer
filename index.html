@@ -115,7 +115,7 @@ select{font-family:var(--body);font-size:15px;min-height:44px;padding:6px 10px;b
 
 <div class="app">
   <header class="top">
-    <div class="brand"><img class="logo" src="logo-96.png" alt="" width="34" height="34"><h1>Ghost<b>timer</b></h1></div>
+    <div class="brand"><img class="logo" src="logo-96.png?v=3" alt="" width="34" height="34"><h1>Ghost<b>timer</b></h1></div>
     <input type="file" id="file" accept="video/*" hidden>
     <button class="btn primary" id="loadBtn" type="button">+ Video</button>
   </header>
@@ -688,4 +688,4 @@ requestAnimationFrame(loop);
   }));
 })();
 </script>
-<script>if("serviceWorker" in navigator){addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}))}</script></body></html>
+<script>if("serviceWorker" in navigator){addEventListener("load",()=>navigator.serviceWorker.register("sw.js",{updateViaCache:"none"}).then(r=>r.update()).catch(()=>{}))}</script></body></html>
