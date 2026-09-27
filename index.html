@@ -221,7 +221,7 @@ select{font-family:var(--body);font-size:15px;min-height:44px;padding:6px 10px;b
         <div class="stack">
           <button class="btn primary" id="exportBtn" type="button" disabled>Grabar video con tiempos</button>
           <div class="bar" id="bar" hidden><i id="barFill"></i></div>
-          <p class="hint" id="exportHint">Versión 9 · La grabación corre en tiempo real. Dejá la pantalla prendida y no cambies de app mientras graba.</p>
+          <p class="hint" id="exportHint">Versión 10 · La grabación corre en tiempo real. Dejá la pantalla prendida y no cambies de app mientras graba.</p>
           <button class="btn dark" id="saveBtn" type="button" hidden>Guardar video</button>
         </div>
       </section>
@@ -865,6 +865,8 @@ window.ghostCheckShared = async () => {
   } catch (e) { msg('No pude abrir el video compartido. Probá cargarlo con "+ Video".', 'warn'); }
 };
 window.ghostCheckShared();
+// the page may reload itself to pick up a new version only while nothing is loaded
+window.ghostCanReload = () => S.demo && !S.exporting;
 })();
 </script>
 
@@ -877,4 +879,15 @@ window.ghostCheckShared();
   }));
 })();
 </script>
-<script>if("serviceWorker" in navigator){addEventListener("load",()=>navigator.serviceWorker.register("sw.js",{updateViaCache:"none"}).then(r=>r.update()).catch(()=>{}))}</script></body></html>
+<script>
+if ("serviceWorker" in navigator) {
+  addEventListener("load", () => {
+    const had = !!navigator.serviceWorker.controller; let done = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (!had || done) return; done = true;
+      if (window.ghostCanReload && window.ghostCanReload()) location.reload();
+    });
+    navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).then(r => r.update()).catch(() => {});
+  });
+}
+</script></body></html>
