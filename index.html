@@ -220,7 +220,7 @@ select{font-family:var(--body);font-size:15px;min-height:44px;padding:6px 10px;b
         <div class="stack">
           <button class="btn primary" id="exportBtn" type="button" disabled>Grabar video con tiempos</button>
           <div class="bar" id="bar" hidden><i id="barFill"></i></div>
-          <p class="hint" id="exportHint">La grabación corre en tiempo real. Dejá la pantalla prendida y no cambies de app mientras graba.</p>
+          <p class="hint" id="exportHint">Versión 5 · La grabación corre en tiempo real. Dejá la pantalla prendida y no cambies de app mientras graba.</p>
           <button class="btn dark" id="saveBtn" type="button" hidden>Guardar video</button>
         </div>
       </section>
@@ -228,6 +228,7 @@ select{font-family:var(--body);font-size:15px;min-height:44px;padding:6px 10px;b
   </div>
 </div>
 
+<script src="mp4-muxer.js"></script>
 <video id="vid" playsinline webkit-playsinline preload="auto" aria-hidden="true" style="position:fixed;left:0;bottom:0;width:4px;height:4px;opacity:.01;pointer-events:none;z-index:-1"></video>
 
 <script>
@@ -278,7 +279,7 @@ async function analyze(file){
   for (let c = 0; c < ab.numberOfChannels; c++) chs.push(ab.getChannelData(c));
   const mono = new Float32Array(len);
   for (let i = 0; i < len; i++) { let m = 0; for (const ch of chs) { const v = ch[i]; if (Math.abs(v) > Math.abs(m)) m = v; } mono[i] = m; }
-  S.mono = mono; S.sr = sr;
+  S.mono = mono; S.sr = sr; S.audioBuf = ab;
   const hop = Math.max(1, Math.round(sr / 1000)), n = Math.floor(len / hop), env = new Float32Array(n);
   for (let i = 0; i < n; i++) { let m = 0; const o = i * hop; for (let j = 0; j < hop; j++) { const a = Math.abs(mono[o + j]); if (a > m) m = a; } env[i] = m; }
   S.env = env;
@@ -407,8 +408,8 @@ const getMono = () => '"JetBrains Mono", ui-monospace, Menlo, monospace';
 const getDisplay = () => '"Chakra Petch", "Arial Narrow", sans-serif';
 
 // ---------- stage render ----------
-function drawStage(){
-  const W = cv.width, H = cv.height, t = now();
+function drawStage(tOver){
+  const W = cv.width, H = cv.height, t = tOver != null ? tOver : now();
   if (S.demo) {
     const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#1c2226'); g.addColorStop(1, '#0b0e10');
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
@@ -670,7 +671,109 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden && S.exporting) { if (recorder && recorder.state === 'recording') recorder.pause(); vid.pause(); msg('La grabación se pausó porque saliste de la app. Volvé y se retoma sola.', 'warn'); }
   else if (!document.hidden && S.exporting) { vid.play().catch(() => {}); msg('Grabando en tiempo real… dejá la pantalla prendida y no cambies de app.'); }
 });
-$('exportBtn').onclick = startExport;
+// ---------- export v2: real MP4 with WebCodecs (plays complete on any phone) ----------
+async function pickVideoCodec(W, H){
+  for (const [codec, mux] of [['avc1.640028', 'avc'], ['avc1.4d0028', 'avc'], ['avc1.42002a', 'avc'], ['avc1.42001f', 'avc'], ['vp09.00.40.08', 'vp9'], ['vp09.00.10.08', 'vp9']]) {
+    try { const r = await VideoEncoder.isConfigSupported({ codec, width: W, height: H, bitrate: 8e6, framerate: FPS }); if (r.supported) return { codec, mux }; } catch (e) {}
+  }
+  return null;
+}
+async function pickAudioCodec(ch){
+  if (!window.AudioEncoder) return null;
+  for (const [codec, mux] of [['mp4a.40.2', 'aac'], ['opus', 'opus']]) {
+    try { const r = await AudioEncoder.isConfigSupported({ codec, sampleRate: 48000, numberOfChannels: ch, bitrate: 160000 }); if (r.supported) return { codec, mux }; } catch (e) {}
+  }
+  return null;
+}
+async function sliceAudio48k(a, b){
+  const buf = S.audioBuf; if (!buf) return null;
+  const ch = Math.min(2, buf.numberOfChannels), len = Math.max(1, Math.round((b - a) * 48000));
+  const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  const oc = new OAC(ch, len, 48000);
+  const src = oc.createBufferSource(); src.buffer = buf; src.connect(oc.destination); src.start(0, a, b - a);
+  return await oc.startRendering();
+}
+async function exportMp4(){
+  const W = cv.width & ~1, H = cv.height & ~1;
+  const vcodec = await pickVideoCodec(W, H);
+  if (!vcodec || !window.Mp4Muxer) return false;
+  const [a, b0] = exportRange(); const b = Math.min(b0, (vid.duration || S.dur) - 0.02);
+  S.exportStart = a; S.exportEnd = b;
+  S.exporting = true; setExportUI(true);
+  if (navigator.wakeLock) navigator.wakeLock.request('screen').then(w => wake = w).catch(() => {});
+  let audio = null, acodec = null;
+  try { audio = await sliceAudio48k(a, b); acodec = audio ? await pickAudioCodec(audio.numberOfChannels) : null; } catch (e) { audio = null; }
+  const target = new Mp4Muxer.ArrayBufferTarget();
+  const muxer = new Mp4Muxer.Muxer({
+    target, fastStart: 'in-memory', firstTimestampBehavior: 'offset',
+    video: { codec: vcodec.mux, width: W, height: H, frameRate: FPS },
+    audio: acodec ? { codec: acodec.mux, numberOfChannels: audio.numberOfChannels, sampleRate: 48000 } : undefined
+  });
+  let encErr = null;
+  const venc = new VideoEncoder({ output: (c, m) => muxer.addVideoChunk(c, m), error: e => encErr = e });
+  venc.configure(Object.assign({ codec: vcodec.codec, width: W, height: H, bitrate: W * H > 1e6 ? 8e6 : 5e6, framerate: FPS }, vcodec.mux === 'avc' ? { avc: { format: 'avc' } } : {}));
+  // video frames: play the clip muted and grab every decoded frame
+  const wasMuted = vid.muted; vid.muted = true; vid.pause();
+  vid.currentTime = a; await new Promise(r => vid.addEventListener('seeked', r, { once: true }));
+  let n = 0, lastT = -1;
+  const grab = t => {
+    if (t <= lastT || t > b + 0.001) return;
+    lastT = t; drawStage(t);
+    if (venc.encodeQueueSize > 8) return;
+    const f = new VideoFrame(cv, { timestamp: Math.round((t - a) * 1e6), duration: Math.round(1e6 / FPS) });
+    venc.encode(f, { keyFrame: n % (FPS * 2) === 0 }); f.close(); n++;
+    $('barFill').style.width = Math.min(100, (t - a) / (b - a) * 100) + '%';
+  };
+  await new Promise(resolve => {
+    let done = false;
+    const finish = () => { if (!done) { done = true; vid.pause(); resolve(); } };
+    vid.addEventListener('ended', finish, { once: true });
+    const hasRVFC = 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
+    const onFrame = (_, meta) => { const t = meta ? meta.mediaTime : vid.currentTime; grab(t); if (t >= b || encErr) finish(); else if (!done) schedule(); };
+    const schedule = () => hasRVFC ? vid.requestVideoFrameCallback(onFrame) : requestAnimationFrame(() => onFrame(null, null));
+    const keepGoing = () => { if (!done && vid.paused && !document.hidden) vid.play().catch(() => {}); };
+    vid.addEventListener('pause', () => setTimeout(keepGoing, 150));
+    document.addEventListener('visibilitychange', keepGoing);
+    grab(a); schedule(); vid.play().catch(() => {});
+  });
+  vid.muted = wasMuted;
+  await venc.flush(); venc.close();
+  if (encErr) throw encErr;
+  // audio track from the original file
+  if (acodec) {
+    const aenc = new AudioEncoder({ output: (c, m) => muxer.addAudioChunk(c, m), error: e => encErr = e });
+    aenc.configure({ codec: acodec.codec, sampleRate: 48000, numberOfChannels: audio.numberOfChannels, bitrate: 160000 });
+    const chs = audio.numberOfChannels, total = audio.length, step = 4800;
+    const planes = []; for (let c = 0; c < chs; c++) planes.push(audio.getChannelData(c));
+    for (let i = 0; i < total; i += step) {
+      const k = Math.min(step, total - i), data = new Float32Array(k * chs);
+      for (let c = 0; c < chs; c++) data.set(planes[c].subarray(i, i + k), c * k);
+      const ad = new AudioData({ format: 'f32-planar', sampleRate: 48000, numberOfFrames: k, numberOfChannels: chs, timestamp: Math.round(i / 48000 * 1e6), data });
+      aenc.encode(ad); ad.close();
+    }
+    await aenc.flush(); aenc.close();
+  }
+  muxer.finalize();
+  S.blob = new Blob([target.buffer], { type: 'video/mp4' }); S.ext = 'mp4';
+  S.exporting = false; setExportUI(false);
+  if (wake) { try { wake.release(); } catch (e) {} wake = null; }
+  $('saveBtn').hidden = false;
+  $('saveBtn').textContent = `Guardar video (.mp4, ${(S.blob.size / 1048576).toFixed(1)} MB, ${(b - a).toFixed(1)} s)`;
+  msg(acodec ? 'Listo. Tocá "Guardar video" para bajarlo.' : 'Listo, pero este teléfono no pudo agregar el sonido. Tocá "Guardar video".', acodec ? 'ok' : 'warn');
+  drawStage();
+  return true;
+}
+async function exportAny(){
+  if (S.demo || S.exporting) return;
+  ensureAudio();
+  $('saveBtn').hidden = true;
+  if (window.VideoEncoder && window.VideoFrame && window.Mp4Muxer) {
+    try { if (await exportMp4()) return; }
+    catch (e) { S.exporting = false; setExportUI(false); vid.muted = false; console.error(e); msg('No se pudo grabar con el método nuevo. Pruebo con el método anterior…', 'warn'); }
+  }
+  startExport();
+}
+$('exportBtn').onclick = exportAny;
 
 let dl = null;
 (async () => { try { dl = window.claude && window.claude.use ? await window.claude.use('downloads') : null; } catch (e) { dl = null; } })();
@@ -687,6 +790,7 @@ $('saveBtn').onclick = async () => {
 // ---------- loop ----------
 function loop(){
   if (S.demo) { demoT = ((performance.now() - demoStart) / 1000) % S.dur; drawStage(); drawTimeline(); }
+  else if (S.exporting && !recorder) { }
   else if (!vid.paused || S.exporting) {
     drawStage(); drawTimeline();
     const t = vid.currentTime;
