@@ -211,7 +211,8 @@ select{font-family:var(--body);font-size:15px;min-height:44px;padding:6px 10px;b
 
       <section class="panel" id="pExp" role="tabpanel" hidden>
         <h2>Exportar</h2>
-        <label class="check"><input type="checkbox" id="optTrim" checked> Recortar a la serie (2 s antes del beep y 2 s después del último tiro)</label>
+        <label class="check"><input type="checkbox" id="optTrim"> Recortar a la serie (2 s antes del beep y 2 s después del último tiro)</label>
+        <div class="msg" id="rangeInfo">Se graba el video completo.</div>
         <div class="field">
           <label class="label" for="res">Resolución</label>
           <select id="res"><option value="1280">HD 720p (recomendado en el teléfono)</option><option value="1920">Full HD 1080p</option><option value="0">Original</option></select>
@@ -227,7 +228,7 @@ select{font-family:var(--body);font-size:15px;min-height:44px;padding:6px 10px;b
   </div>
 </div>
 
-<video id="vid" playsinline webkit-playsinline preload="auto" hidden></video>
+<video id="vid" playsinline webkit-playsinline preload="auto" aria-hidden="true" style="position:fixed;left:0;bottom:0;width:4px;height:4px;opacity:.01;pointer-events:none;z-index:-1"></video>
 
 <script>
 (() => {
@@ -479,6 +480,21 @@ tl.addEventListener('pointermove', e => { if (dragging) seekFromTimeline(e); });
 tl.addEventListener('pointerup', () => dragging = false);
 
 // ---------- list + stats ----------
+function exportRange(){
+  const shots = sortedShots();
+  const trim = $('optTrim').checked && shots.length;
+  const a = trim ? Math.max(0, Math.min(S.beep, shots[0]) - 2) : 0;
+  const b = trim ? Math.min(S.dur, shots[shots.length - 1] + 2) : S.dur;
+  return [a, b];
+}
+function showRange(){
+  const el = $('rangeInfo'); if (!el) return;
+  if (S.demo) { el.textContent = 'Cargá un video para ver cuánto se va a grabar.'; el.className = 'msg'; return; }
+  const [a, b] = exportRange(), len = b - a;
+  el.textContent = `Se graba desde ${a.toFixed(1)} s hasta ${b.toFixed(1)} s del video: ${len.toFixed(1)} s en total (dura lo mismo grabarlo).`;
+  el.className = 'msg' + (len < 6 && len < S.dur - 0.5 ? ' warn' : '');
+  if (len < 6 && len < S.dur - 0.5) el.textContent += ' Es muy corto: revisá los tiros o sacá el recorte.';
+}
 function refresh(){
   const shots = sortedShots(), tb = $('shotBody');
   tb.innerHTML = '';
@@ -507,6 +523,7 @@ function refresh(){
   $('stBest').textContent = splits.length ? f2(Math.min(...splits)) : '–';
   $('stAvg').textContent = splits.length ? f2(splits.reduce((a, b) => a + b, 0) / splits.length) : '–';
   $('stBeep').textContent = f2(S.beep);
+  showRange();
   drawTimeline();
   if (vid.paused) drawStage();
 }
@@ -583,6 +600,7 @@ document.addEventListener('keydown', e => {
 $('th').oninput = e => { $('thOut').textContent = e.target.value + '%'; drawTimeline(); };
 $('gap').oninput = e => { $('gapOut').textContent = e.target.value + ' ms'; };
 $('th').onchange = $('gap').onchange = () => runDetection();
+$('optTrim').onchange = showRange;
 $('redetect').onclick = runDetection;
 $('size').oninput = e => { O.size = e.target.value / 100; $('sizeOut').textContent = e.target.value + '%'; drawStage(); };
 $('optList').onchange = e => { O.list = e.target.checked; drawStage(); };
@@ -606,10 +624,8 @@ async function startExport(){
   if (S.demo || S.exporting) return;
   if (!window.MediaRecorder || !cv.captureStream) { msg('Este navegador no puede grabar video. En iPhone usá Safari actualizado; en Android, Chrome.', 'warn'); return; }
   ensureAudio();
-  const shots = sortedShots();
-  const trim = $('optTrim').checked && shots.length;
-  S.exportStart = trim ? Math.max(0, S.beep - 2) : 0;
-  S.exportEnd = trim ? Math.min(S.dur, shots[shots.length - 1] + 2) : S.dur;
+  [S.exportStart, S.exportEnd] = exportRange();
+  S.exportEnd = Math.min(S.exportEnd, (vid.duration || S.dur) - 0.05);
   const mime = pickMime(); S.ext = mime.includes('mp4') ? 'mp4' : 'webm';
   const stream = cv.captureStream(FPS);
   recDest.stream.getAudioTracks().forEach(t => stream.addTrack(t));
@@ -641,6 +657,19 @@ function setExportUI(on){
 }
 function stopExport(){ if (!S.exporting) return; vid.pause(); if (recorder && recorder.state !== 'inactive') recorder.stop(); }
 vid.onended = () => stopExport();
+// If the phone pauses the video mid-recording (buffering, audio focus), pause the recorder and resume.
+vid.addEventListener('pause', () => {
+  if (!S.exporting || vid.ended || vid.currentTime >= S.exportEnd - 0.05) return;
+  if (recorder && recorder.state === 'recording') recorder.pause();
+  setTimeout(() => { if (S.exporting) vid.play().catch(() => {}); }, 150);
+});
+vid.addEventListener('playing', () => { if (S.exporting && recorder && recorder.state === 'paused') recorder.resume(); });
+vid.addEventListener('waiting', () => { if (S.exporting && recorder && recorder.state === 'recording') recorder.pause(); });
+vid.addEventListener('canplay', () => { if (S.exporting && !vid.paused && recorder && recorder.state === 'paused') recorder.resume(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && S.exporting) { if (recorder && recorder.state === 'recording') recorder.pause(); vid.pause(); msg('La grabación se pausó porque saliste de la app. Volvé y se retoma sola.', 'warn'); }
+  else if (!document.hidden && S.exporting) { vid.play().catch(() => {}); msg('Grabando en tiempo real… dejá la pantalla prendida y no cambies de app.'); }
+});
 $('exportBtn').onclick = startExport;
 
 let dl = null;
@@ -658,13 +687,13 @@ $('saveBtn').onclick = async () => {
 // ---------- loop ----------
 function loop(){
   if (S.demo) { demoT = ((performance.now() - demoStart) / 1000) % S.dur; drawStage(); drawTimeline(); }
-  else if (!vid.paused) {
+  else if (!vid.paused || S.exporting) {
     drawStage(); drawTimeline();
     const t = vid.currentTime;
     $('readout').innerHTML = `${Math.max(0, t - S.beep).toFixed(2)} <small>/ ${t.toFixed(2)} s</small>`;
     if (S.exporting) {
       $('barFill').style.width = Math.min(100, (t - S.exportStart) / (S.exportEnd - S.exportStart) * 100) + '%';
-      if (t >= S.exportEnd) stopExport();
+      if (t >= S.exportEnd && !vid.paused) stopExport();
     }
   } else {
     const t = vid.currentTime;
