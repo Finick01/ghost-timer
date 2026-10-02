@@ -189,6 +189,11 @@ select{font-family:var(--body);font-size:15px;min-height:44px;padding:6px 10px;b
           <input type="range" id="gap" min="40" max="300" step="5" value="70">
           <p class="hint">Evita contar el eco como otro tiro.</p>
         </div>
+        <div class="field">
+          <label class="label" for="optOwn">Filtro de otras pistas</label>
+          <select id="optOwn"><option value="normal" selected>Normal</option><option value="strict">Estricto</option><option value="off">Apagado</option></select>
+          <p class="hint">Descarta los disparos que suenan más apagados y débiles que los tuyos. Si te saca tiros propios, ponelo en Apagado; si siguen entrando tiros ajenos, en Estricto.</p>
+        </div>
         <button class="btn" id="redetect" type="button" disabled>Volver a detectar</button>
       </section>
 
@@ -223,7 +228,7 @@ select{font-family:var(--body);font-size:15px;min-height:44px;padding:6px 10px;b
         <div class="stack">
           <button class="btn primary" id="exportBtn" type="button" disabled>Grabar video con tiempos</button>
           <div class="bar" id="bar" hidden><i id="barFill"></i></div>
-          <p class="hint" id="exportHint">Versión 14 · La grabación corre en tiempo real. Dejá la pantalla prendida y no cambies de app mientras graba.</p>
+          <p class="hint" id="exportHint">Versión 15 · La grabación corre en tiempo real. Dejá la pantalla prendida y no cambies de app mientras graba.</p>
           <button class="btn dark" id="saveBtn" type="button" hidden>Guardar video</button>
         </div>
       </section>
@@ -312,6 +317,8 @@ function pctl(arr, p){
 function shotClusters(){
   const sr = S.sr, hop = Math.round(sr / 1000), y = highpass(S.mono, sr, 900), n = Math.floor(y.length / hop);
   const toT = i => i * hop / sr, toI = t => Math.round(t * sr / hop);
+  const x = S.mono, y3 = highpass(x, sr, 3000), n30 = Math.round(0.03 * sr), n60 = Math.round(0.06 * sr);
+  const msq = (arr, a, len) => { const b = Math.min(arr.length, a + len); let q = 0; for (let i = a; i < b; i++) q += arr[i] * arr[i]; return b > a ? q / (b - a) : 0; };
   const db = new Float32Array(n), pw = new Float32Array(n);
   for (let i = 0; i < n; i++) {
     let m = 0, s = 0; const o = i * hop;
@@ -338,7 +345,9 @@ function shotClusters(){
     let on = a; while (on < ip && db[on] < P - 10) on++;
     const lim = Math.max(0, toI(g.t0) - 25);
     while (on > lim && db[on - 1] >= P - 14 && db[on - 1] < db[on] + 1) on--;
-    return { t: toT(on), E: Math.max(...g.m.map(c => c.E)), dE: Math.max(...g.m.map(c => c.dE)) };
+    const i0 = on * hop, e9 = msq(y, i0, n30), e30 = msq(y3, i0, n30);
+    return { t: toT(on), E: Math.max(...g.m.map(c => c.E)), dE: Math.max(...g.m.map(c => c.dE)),
+      hf: 10 * Math.log10((e30 + 1e-12) / Math.max(e9 - e30, 1e-12)), full: 10 * Math.log10(msq(x, i0, n60) + 1e-12) };
   });
 }
 function fftMag(re, im){ // in-place radix-2 FFT, returns nothing (re/im overwritten)
@@ -408,6 +417,24 @@ function dropEchoes(acc){
   }
   return keep;
 }
+// Shots from other bays arrive muffled (less treble) and weaker than the shooter's own shots.
+// Take the loudest shots of the video as the reference for "my shots" and drop the ones that clearly differ.
+function ownShots(acc, ref){
+  const mode = $('optOwn') ? $('optOwn').value : 'normal';
+  if (mode === 'off' || acc.length < 4) return acc;
+  let top = acc.filter(c => c.E >= ref - 6 && c.dE >= 12);
+  if (top.length < 3) top = acc.filter(c => c.E >= ref - 6);
+  if (top.length < 3) return acc;
+  const med = a => pctl(a, 50), mad = a => { const m = med(a); return med(a.map(v => Math.abs(v - m))); };
+  const hfs = top.map(c => c.hf), fus = top.map(c => c.full), hfr = med(hfs), fr = med(fus);
+  const [k, minH, minF] = mode === 'strict' ? [2, 1.8, 3.5] : [3, 2.5, 5];
+  const H = Math.max(minH, k * mad(hfs)), F = Math.max(minF, k * mad(fus));
+  return acc.filter(c => {
+    if (c.full < fr - F) return false;        // clearly weaker than my shots
+    if (c.hf < hfr - 2 * H) return false;     // clearly muffled: far away or behind a berm
+    return !(c.hf < hfr - H && c.full < fr - 1.5); // a bit of both: someone else's
+  });
+}
 function detectAll(){
   const forced = S.forcedBeep;
   const sens = Math.min(1, Math.max(0, (90 - +$('th').value) / 100)), gap = +$('gap').value / 1000;
@@ -423,10 +450,11 @@ function detectAll(){
   const ref = pctl(after.map(c => c.E), 95), D = 4 + 12 * sens, acc = [];
   for (const c of after) {
     if (c.E < ref - D || c.dE < 4) continue;
-    if (acc.length && c.t - acc[acc.length - 1].t < gap) continue;
+    const last = acc[acc.length - 1];
+    if (last && c.t - last.t < gap) { if (c.E > last.E + 6 && c.dE > last.dE) acc[acc.length - 1] = c; continue; } // a weak blip right before the real shot
     acc.push(c);
   }
-  return { beep, shots: dropEchoes(acc).map(c => c.t) };
+  return { beep, shots: ownShots(dropEchoes(acc), ref).map(c => c.t) };
 }
 function runDetection(){
   if (S.demo || !S.env) return;
@@ -720,7 +748,7 @@ document.addEventListener('keydown', e => {
 // ---------- controls ----------
 $('th').oninput = e => { $('thOut').textContent = e.target.value + '%'; drawTimeline(); };
 $('gap').oninput = e => { $('gapOut').textContent = e.target.value + ' ms'; };
-$('th').onchange = $('gap').onchange = () => runDetection();
+$('th').onchange = $('gap').onchange = $('optOwn').onchange = () => runDetection();
 $('optTrim').onchange = showRange;
 $('redetect').onclick = runDetection;
 $('size').oninput = e => { O.size = e.target.value / 100; $('sizeOut').textContent = e.target.value + '%'; drawStage(); };
