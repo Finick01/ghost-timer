@@ -183,7 +183,7 @@ select{font-family:var(--body);font-size:15px;min-height:44px;padding:6px 10px;b
         <h2>Detección</h2>
         <div class="field">
           <div class="row"><label class="label" for="th">Sensibilidad</label><output id="thOut">40%</output></div>
-          <input type="range" id="th" min="10" max="90" value="40">
+          <input type="range" id="th" min="10" max="100" value="40">
           <p class="hint">Más bajo detecta más tiros (también los más débiles). Si aparecen tiros de la pista de al lado, subilo. La línea punteada sobre el audio marca el nivel: los picos que la pasan cuentan como tiro.</p>
         </div>
         <div class="field">
@@ -440,7 +440,7 @@ function ownShots(acc, ref){
 function detectAll(){
   S.detRef = 0;
   const forced = S.forcedBeep;
-  const sens = Math.min(1, Math.max(0, (90 - +$('th').value) / 100)), gap = +$('gap').value / 1000;
+  const sens = Math.min(1, (90 - +$('th').value) / 100), gap = +$('gap').value / 1000;
   const cl = shotClusters();
   if (!cl.length) return { beep: S.forcedBeep != null ? { t: S.forcedBeep, end: S.forcedBeep } : null, shots: [] };
   const refAll = pctl(cl.map(c => c.E), 95), loud = cl.filter(c => c.E >= refAll - 10).map(c => c.t);
@@ -598,7 +598,7 @@ function drawTimeline(){
   }
   // sensitivity line: peaks above it count as shots
   if (S.detRef && !S.demo) {
-    const sv = +$('th').value, D = 4 + 12 * Math.min(1, Math.max(0, (90 - sv) / 100));
+    const sv = +$('th').value, D = 4 + 12 * Math.min(1, (90 - sv) / 100);
     const lvl = S.detRef * Math.pow(10, -D / 20), ty = base - Math.min(1, Math.sqrt(lvl / (max || 1))) * amp;
     c.save(); c.strokeStyle = acc; c.lineWidth = 1; c.setLineDash([5, 4]);
     c.beginPath(); c.moveTo(0, ty); c.lineTo(w, ty); c.stroke(); c.setLineDash([]);
