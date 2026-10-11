@@ -184,7 +184,7 @@ select{font-family:var(--body);font-size:15px;min-height:44px;padding:6px 10px;b
         <div class="field">
           <div class="row"><label class="label" for="th">Sensibilidad</label><output id="thOut">40%</output></div>
           <input type="range" id="th" min="10" max="90" value="40">
-          <p class="hint">Más bajo detecta más tiros (también los más débiles). Si aparecen tiros de la pista de al lado, subilo.</p>
+          <p class="hint">Más bajo detecta más tiros (también los más débiles). Si aparecen tiros de la pista de al lado, subilo. La línea punteada sobre el audio marca el nivel: los picos que la pasan cuentan como tiro.</p>
         </div>
         <div class="field">
           <div class="row"><label class="label" for="gap">Separación mínima</label><output id="gapOut">70 ms</output></div>
@@ -438,6 +438,7 @@ function ownShots(acc, ref){
   });
 }
 function detectAll(){
+  S.detRef = 0;
   const forced = S.forcedBeep;
   const sens = Math.min(1, Math.max(0, (90 - +$('th').value) / 100)), gap = +$('gap').value / 1000;
   const cl = shotClusters();
@@ -449,6 +450,7 @@ function detectAll(){
   else if (good.length) { const r = good.reduce((p, q) => (q.ton + 10 * Math.log10(q.end - q.start)) > (p.ton + 10 * Math.log10(p.end - p.start)) ? q : p); beep = { t: refineBeep(r), end: r.end }; }
   const after = cl.filter(c => !beep || c.t > beep.t + 0.08);
   if (!after.length) return { beep, shots: [] };
+  S.detRef = pctl(after.map(c => { let m = 0; const i0 = Math.max(0, Math.floor(c.t * 1000)); for (let i = i0; i < i0 + 60 && i < S.env.length; i++) if (S.env[i] > m) m = S.env[i]; return m; }), 95);
   const ref = pctl(after.map(c => c.E), 95), D = 4 + 12 * sens, acc = [];
   for (const c of after) {
     if (c.E < ref - D || c.dE < 4) continue;
@@ -594,7 +596,15 @@ function drawTimeline(){
     const v = Math.sqrt(m / (max || 1)) * amp;
     c.fillRect(px, base - v, 1, v);
   }
-  // threshold
+  // sensitivity line: peaks above it count as shots
+  if (S.detRef && !S.demo) {
+    const sv = +$('th').value, D = 4 + 12 * Math.min(1, Math.max(0, (90 - sv) / 100));
+    const lvl = S.detRef * Math.pow(10, -D / 20), ty = base - Math.min(1, Math.sqrt(lvl / (max || 1))) * amp;
+    c.save(); c.strokeStyle = acc; c.lineWidth = 1; c.setLineDash([5, 4]);
+    c.beginPath(); c.moveTo(0, ty); c.lineTo(w, ty); c.stroke(); c.setLineDash([]);
+    c.fillStyle = acc; c.font = `700 10px ${getDisplay()}`; c.textAlign = 'right'; c.textBaseline = 'alphabetic';
+    c.fillText('SENS ' + sv + '%', w - 4, Math.max(10, ty - 3)); c.restore();
+  }
   // time ticks
   c.fillStyle = mut; c.font = `500 10px ${getMono()}`; c.textBaseline = 'alphabetic';
   const step = span > 60 ? 10 : span > 20 ? 5 : span > 8 ? 1 : 0.5;
