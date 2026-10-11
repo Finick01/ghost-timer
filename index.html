@@ -216,7 +216,6 @@ select{font-family:var(--body);font-size:15px;min-height:44px;padding:6px 10px;b
         </div>
         <label class="check"><input type="checkbox" id="optList" checked> Lista de splits al costado</label>
         <label class="check"><input type="checkbox" id="optFlash" checked> Destello en cada tiro</label>
-        <label class="check"><input type="checkbox" id="optMark" checked> Logo GHOST VIDEO TIMER al final, abajo de los tiros</label>
       </section>
 
       <section class="panel" id="pExp" role="tabpanel" hidden>
@@ -773,7 +772,6 @@ $('redetect').onclick = runDetection;
 $('size').oninput = e => { O.size = e.target.value / 100; $('sizeOut').textContent = e.target.value + '%'; drawStage(); };
 $('optList').onchange = e => { O.list = e.target.checked; drawStage(); };
 $('optFlash').onchange = e => { O.flash = e.target.checked; };
-$('optMark').onchange = e => { O.mark = e.target.checked; drawStage(); };
 $('res').onchange = e => { if (!S.demo) { setCanvasSize(+e.target.value); drawStage(); } };
 document.querySelectorAll('#posSeg button').forEach(b => b.onclick = () => {
   O.pos = b.dataset.p; document.querySelectorAll('#posSeg button').forEach(x => x.setAttribute('aria-pressed', x === b)); drawStage();
