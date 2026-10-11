@@ -35,6 +35,8 @@ body{background:var(--ground);color:var(--ink);font-family:var(--body);font-size
 .logo i{width:12px;height:12px;border-radius:50%;border:3px solid var(--accent);display:block}
 .brand h1{font-family:var(--display);font-weight:700;font-size:21px;letter-spacing:.05em;text-transform:uppercase;margin:0}
 .brand h1 b{color:var(--accent)}
+.brand .ttl{display:flex;flex-direction:column;min-width:0;line-height:1.1}
+.uses{font-family:var(--display);font-weight:600;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);white-space:nowrap;margin-top:2px}
 .btn{font-family:var(--display);font-weight:600;letter-spacing:.06em;text-transform:uppercase;font-size:13px;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:10px;min-height:44px;padding:8px 14px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px;white-space:nowrap;touch-action:manipulation;user-select:none}
 .btn:active{transform:scale(.97)}
 .btn:focus-visible,input:focus-visible,select:focus-visible,.tabs button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
@@ -117,7 +119,7 @@ select{font-family:var(--body);font-size:15px;min-height:44px;padding:6px 10px;b
 
 <div class="app">
   <header class="top">
-    <div class="brand"><img class="logo" src="logo-96.png?v=7" alt="" width="34" height="34"><h1>Ghost<b>timer</b></h1></div>
+    <div class="brand"><img class="logo" src="logo-96.png?v=7" alt="" width="34" height="34"><div class="ttl"><h1>Ghost<b>timer</b></h1><span class="uses" id="uses" title="Videos procesados en este dispositivo">0 usos</span></div></div>
     <input type="file" id="file" accept="video/*" hidden>
     <button class="btn primary" id="loadBtn" type="button">+ Video</button>
   </header>
@@ -673,6 +675,12 @@ function refresh(){
 }
 
 // ---------- loading ----------
+const USES_KEY = 'ghosttimer.uses';
+function readUses(){ try { return parseInt(localStorage.getItem(USES_KEY), 10) || 0; } catch (e) { return 0; } }
+let usesCount = readUses();
+function showUses(){ const el = $('uses'); if (el) el.textContent = usesCount + (usesCount === 1 ? ' uso' : ' usos'); }
+function addUse(){ usesCount++; try { localStorage.setItem(USES_KEY, String(usesCount)); } catch (e) {} showUses(); }
+showUses();
 async function loadFile(file){
   if (!file || !file.type.startsWith('video') && !/\.(mp4|mov|m4v|webm|mkv)$/i.test(file.name)) { msg('Ese archivo no parece un video. Probá con un .mp4 o .mov.', 'warn'); return; }
   if (S.url) URL.revokeObjectURL(S.url);
@@ -685,6 +693,7 @@ async function loadFile(file){
   setCanvasSize(+$('res').value);
   ['playBtn','backBtn','fwdBtn','beepHere','shotHere','redetect','exportBtn'].forEach(id => $(id).disabled = false);
   vid.currentTime = 0;
+  addUse();
   try { await analyze(file); runDetection(); }
   catch (e) {
     S.env = new Float32Array(Math.ceil(S.dur * 1000)); S.mono = null; S.shots = []; S.beep = 0;
