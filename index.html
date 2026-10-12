@@ -686,11 +686,12 @@ function refresh(){
 // ---------- loading ----------
 const USES_KEY = 'ghosttimer.uses';
 const USES_API = 'https://tally.yuki.sh/hits/ghosttimer@finick01/usos';
+const USES_BASE = 563; // el contador arranca desde este número
 function readUses(){ try { return parseInt(localStorage.getItem(USES_KEY), 10) || 0; } catch (e) { return 0; } }
 let usesCount = readUses(), usesGlobal = null;
 function showUses(){
   const el = $('uses'); if (!el) return;
-  const n = usesGlobal != null ? usesGlobal : usesCount;
+  const n = USES_BASE + (usesGlobal != null ? usesGlobal : usesCount);
   el.textContent = n.toLocaleString('es-AR') + (n === 1 ? ' uso' : ' usos');
   el.title = usesGlobal != null ? 'Usos totales de Ghosttimer' : 'Videos procesados en este dispositivo';
 }
