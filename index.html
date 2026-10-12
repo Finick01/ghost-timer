@@ -685,11 +685,29 @@ function refresh(){
 
 // ---------- loading ----------
 const USES_KEY = 'ghosttimer.uses';
+const USES_API = 'https://tally.yuki.sh/hits/ghosttimer@finick01/usos';
 function readUses(){ try { return parseInt(localStorage.getItem(USES_KEY), 10) || 0; } catch (e) { return 0; } }
-let usesCount = readUses();
-function showUses(){ const el = $('uses'); if (el) el.textContent = usesCount + (usesCount === 1 ? ' uso' : ' usos'); }
-function addUse(){ usesCount++; try { localStorage.setItem(USES_KEY, String(usesCount)); } catch (e) {} showUses(); }
-showUses();
+let usesCount = readUses(), usesGlobal = null;
+function showUses(){
+  const el = $('uses'); if (!el) return;
+  const n = usesGlobal != null ? usesGlobal : usesCount;
+  el.textContent = n.toLocaleString('es-AR') + (n === 1 ? ' uso' : ' usos');
+  el.title = usesGlobal != null ? 'Usos totales de Ghosttimer' : 'Videos procesados en este dispositivo';
+}
+async function usesRemote(hit){
+  try {
+    const r = await fetch(USES_API + (hit ? '' : '?mode=read'), { cache: 'no-store' });
+    if (!r.ok) return;
+    const d = await r.json();
+    if (typeof d.visit === 'number') { usesGlobal = d.visit; showUses(); }
+  } catch (e) {}
+}
+function addUse(){
+  usesCount++; try { localStorage.setItem(USES_KEY, String(usesCount)); } catch (e) {}
+  if (usesGlobal != null) usesGlobal++;
+  showUses(); usesRemote(true);
+}
+showUses(); usesRemote(false);
 async function loadFile(file){
   if (!file || !file.type.startsWith('video') && !/\.(mp4|mov|m4v|webm|mkv)$/i.test(file.name)) { msg('Ese archivo no parece un video. Probá con un .mp4 o .mov.', 'warn'); return; }
   if (S.url) URL.revokeObjectURL(S.url);
