@@ -69,6 +69,10 @@ body{background:var(--ground);color:var(--ink);font-family:var(--body);font-size
 #posSeg button:nth-child(-n+2){border-top:0}
 #posSeg button:nth-child(odd){border-right:1px solid var(--line)}
 .keys{display:flex;gap:10px;flex-wrap:wrap;color:var(--muted);font-size:12px}
+.selbar{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px;border:1px solid var(--accent);border-radius:10px;background:var(--accent-soft)}
+.selbar[hidden]{display:none}
+.selbar .selinfo{font-family:var(--display);font-weight:700;font-size:14px;letter-spacing:.04em;margin-right:auto}
+.btn.sm{min-height:42px;padding:6px 11px;font-size:12px}
 @media (pointer:coarse){.keys{display:none}}
 kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 4px;background:var(--panel)}
 .side{display:flex;flex-direction:column;gap:12px;min-width:0}
@@ -138,7 +142,14 @@ select{font-family:var(--body);font-size:15px;min-height:44px;padding:6px 10px;b
             <button type="button" data-v="todo" aria-pressed="false">Todo</button>
           </div>
         </div>
-        <canvas id="tl" aria-label="Audio del video: tocá o arrastrá para moverte"></canvas>
+        <canvas id="tl" aria-label="Audio del video: tocá un tiro para elegirlo o arrastrá para moverte"></canvas>
+        <div class="selbar" id="selbar" hidden>
+          <span class="selinfo" id="selInfo"></span>
+          <button class="btn sm" type="button" data-q="m" aria-label="Retrasar 0,01 segundos">−.01</button>
+          <button class="btn sm" type="button" data-q="p" aria-label="Adelantar 0,01 segundos">+.01</button>
+          <button class="btn sm" type="button" data-q="x" aria-label="Borrar este tiro">✕</button>
+          <button class="btn sm primary" type="button" data-q="f">✓ Es el último</button>
+        </div>
         <div class="transport">
           <button class="btn" id="backBtn" type="button" disabled aria-label="Frame anterior">◀ 1f</button>
           <button class="btn dark" id="playBtn" type="button" disabled>▶ Play</button>
@@ -628,10 +639,24 @@ function seekFromTimeline(ev){
   const t = a + Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)) * (b - a);
   vid.currentTime = Math.max(0, Math.min(S.dur, t));
 }
-let dragging = false;
-tl.addEventListener('pointerdown', e => { dragging = true; tl.setPointerCapture(e.pointerId); seekFromTimeline(e); });
-tl.addEventListener('pointermove', e => { if (dragging) seekFromTimeline(e); });
-tl.addEventListener('pointerup', () => dragging = false);
+let dragging = false, tapHit = -1, tapX = 0;
+function shotAtPointer(ev){
+  const r = tl.getBoundingClientRect(), [a, b] = viewRange();
+  let best = -1, bd = 16;
+  S.shots.forEach((s, i) => { const d = Math.abs(r.left + (s - a) / (b - a) * r.width - ev.clientX); if (d < bd) { bd = d; best = i; } });
+  return best;
+}
+tl.addEventListener('pointerdown', e => { dragging = true; tl.setPointerCapture(e.pointerId); tapX = e.clientX; tapHit = shotAtPointer(e); if (tapHit < 0) seekFromTimeline(e); });
+tl.addEventListener('pointermove', e => {
+  if (!dragging) { tl.style.cursor = shotAtPointer(e) >= 0 ? 'pointer' : ''; return; }
+  if (tapHit >= 0 && Math.abs(e.clientX - tapX) > 6) tapHit = -1;
+  if (tapHit < 0) seekFromTimeline(e);
+});
+tl.addEventListener('pointerup', () => {
+  dragging = false;
+  if (tapHit >= 0) { const s = S.shots[tapHit]; S.sel = tapHit; if (!S.demo && s != null) vid.currentTime = Math.max(0, s - 0.25); tapHit = -1; refresh(); }
+});
+tl.addEventListener('pointercancel', () => { dragging = false; tapHit = -1; });
 
 // ---------- list + stats ----------
 function exportRange(){
@@ -649,6 +674,24 @@ function showRange(){
   el.className = 'msg' + (len < 6 && len < S.dur - 0.5 ? ' warn' : '');
   if (len < 6 && len < S.dur - 0.5) el.textContent += ' Es muy corto: revisá los tiros o sacá el recorte.';
 }
+function renderChips(shots){
+  const bar = $('selbar');
+  const k = shots.findIndex(s => S.shots.indexOf(s) === S.sel);
+  bar.hidden = k < 0;
+  if (k >= 0) {
+    const isLast = k === shots.length - 1;
+    $('selInfo').textContent = `Tiro ${k + 1} · ${(shots[k] - S.beep).toFixed(2)}`;
+    const fb = bar.querySelector('[data-q="f"]'); fb.disabled = isLast; fb.textContent = isLast ? 'Ya es el último' : '✓ Es el último';
+  }
+}
+$('selbar').addEventListener('click', e => {
+  const btn = e.target.closest('button'); if (!btn || S.sel < 0) return;
+  const a = btn.dataset.q, idx = S.sel, s = S.shots[idx], i = sortedShots().indexOf(s);
+  if (a === 'x') { S.shots.splice(idx, 1); S.sel = -1; }
+  else if (a === 'f') { const n0 = S.shots.length; S.shots = S.shots.filter(v => v <= s); S.sel = -1; msg(n0 - S.shots.length ? `Listo: el tiro ${i + 1} es el último. Borré ${n0 - S.shots.length} tiros que venían después.` : 'Este ya es el último tiro.', 'ok'); }
+  else if (a === 'm' || a === 'p') { S.shots[idx] = Math.max(0, s + (a === 'p' ? .01 : -.01)); }
+  refresh();
+});
 function refresh(){
   const shots = sortedShots(), tb = $('shotBody');
   tb.innerHTML = '';
@@ -678,6 +721,7 @@ function refresh(){
   $('stBest').textContent = splits.length ? f2(Math.min(...splits)) : '–';
   $('stAvg').textContent = splits.length ? f2(splits.reduce((a, b) => a + b, 0) / splits.length) : '–';
   $('stBeep').textContent = f2(S.beep);
+  renderChips(shots);
   showRange();
   drawTimeline();
   if (vid.paused) drawStage();
