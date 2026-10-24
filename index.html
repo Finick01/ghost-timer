@@ -73,7 +73,7 @@ body{background:var(--ground);color:var(--ink);font-family:var(--body);font-size
 .selbar[hidden]{display:none}
 .selbar .selinfo{font-family:var(--display);font-weight:700;font-size:14px;letter-spacing:.04em;margin-right:auto}
 .btn.sm{min-height:42px;padding:6px 11px;font-size:12px}
-.brand .sub{display:flex;align-items:baseline;gap:10px}
+.brand .sub{display:flex;align-items:baseline;gap:4px 10px;flex-wrap:wrap}
 .lo{background:none;border:0;padding:4px 2px;font-family:var(--display);font-weight:600;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);cursor:pointer}
 .auth{position:fixed;inset:0;z-index:1000;background:var(--ground);color:var(--ink);display:flex;align-items:center;justify-content:center;padding:20px;overflow:auto;font-family:var(--body)}
 .authbox{width:min(100%,380px);background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px;display:flex;flex-direction:column;gap:16px}
@@ -162,7 +162,7 @@ select{font-family:var(--body);font-size:15px;min-height:44px;padding:6px 10px;b
 
 <div class="app">
   <header class="top">
-    <div class="brand"><img class="logo" src="logo-96.png?v=7" alt="" width="34" height="34"><div class="ttl"><h1>Ghost<b>timer</b></h1><div class="sub"><span class="uses" id="uses" title="Videos procesados en este dispositivo">0 usos</span><button class="lo" id="adminBtn" type="button" hidden>Admin</button><button class="lo" id="logout" type="button" hidden>Salir</button></div></div></div>
+    <div class="brand"><img class="logo" src="logo-96.png?v=7" alt="" width="34" height="34"><div class="ttl"><h1>Ghost<b>timer</b></h1><div class="sub"><span class="uses" id="uses" title="Videos procesados en este dispositivo">0 usos</span><button class="lo" id="adminBtn" type="button" hidden>Admin</button><button class="lo" id="logout" type="button" hidden>Cerrar sesión</button></div></div></div>
     <input type="file" id="file" accept="video/*" hidden>
     <button class="btn primary" id="loadBtn" type="button">+ Video</button>
   </header>
