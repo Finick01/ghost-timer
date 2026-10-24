@@ -93,6 +93,25 @@ body{background:var(--ground);color:var(--ink);font-family:var(--body);font-size
 .linkbtn{background:none;border:0;padding:8px 2px;font-family:var(--body);font-size:14px;color:var(--accent);cursor:pointer;text-decoration:underline}
 .authload,.authblocked p{margin:0;font-size:15px;line-height:1.45}
 .authblocked{display:flex;flex-direction:column;gap:14px}
+.adm{position:fixed;inset:0;z-index:900;background:var(--ground);color:var(--ink);overflow:auto;padding:16px;font-family:var(--body)}
+.admbox{max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:12px}
+.admbar{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.admbar h2{margin:0;font-family:var(--display);font-weight:700;font-size:22px;letter-spacing:.04em;text-transform:uppercase}
+.admstats{margin:0;font-size:14px;color:var(--muted)}
+.admbox input[type=search]{font-family:var(--body);font-size:16px;min-height:46px;padding:8px 12px;border-radius:10px;border:1px solid var(--line);background:var(--panel-2);color:var(--ink)}
+#admList{display:flex;flex-direction:column;gap:10px}
+.admrow{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:8px}
+.admrow.off{opacity:.75;border-style:dashed}
+.admtop{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.admmail{font-size:15px;overflow-wrap:anywhere}
+.admtag{font-family:var(--display);font-weight:700;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
+.admrow:not(.off) .admtag{color:var(--good)}
+.admmeta{font-size:13px;color:var(--muted)}
+.admctl{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.admctl select,.admctl input[type=date]{font-family:var(--body);font-size:15px;min-height:42px;padding:6px 10px;border-radius:10px;border:1px solid var(--line);background:var(--panel-2);color:var(--ink)}
+.btn.warn{background:#c0392b;border-color:#c0392b;color:#fff}
+.admfoot{margin:0;font-size:13px;color:var(--muted)}
+.admfoot a{color:var(--accent)}
 @media (pointer:coarse){.keys{display:none}}
 kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 4px;background:var(--panel)}
 .side{display:flex;flex-direction:column;gap:12px;min-width:0}
@@ -143,7 +162,7 @@ select{font-family:var(--body);font-size:15px;min-height:44px;padding:6px 10px;b
 
 <div class="app">
   <header class="top">
-    <div class="brand"><img class="logo" src="logo-96.png?v=7" alt="" width="34" height="34"><div class="ttl"><h1>Ghost<b>timer</b></h1><div class="sub"><span class="uses" id="uses" title="Videos procesados en este dispositivo">0 usos</span><button class="lo" id="logout" type="button" hidden>Salir</button></div></div></div>
+    <div class="brand"><img class="logo" src="logo-96.png?v=7" alt="" width="34" height="34"><div class="ttl"><h1>Ghost<b>timer</b></h1><div class="sub"><span class="uses" id="uses" title="Videos procesados en este dispositivo">0 usos</span><button class="lo" id="adminBtn" type="button" hidden>Admin</button><button class="lo" id="logout" type="button" hidden>Salir</button></div></div></div>
     <input type="file" id="file" accept="video/*" hidden>
     <button class="btn primary" id="loadBtn" type="button">+ Video</button>
   </header>
@@ -1123,7 +1142,17 @@ if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).then(r => r.update()).catch(() => {});
   });
 }
-</script><div class="auth" id="auth" role="dialog" aria-modal="true" aria-labelledby="authTitle">
+</script><div class="adm" id="admin" hidden role="dialog" aria-modal="true" aria-labelledby="admTitle">
+  <div class="admbox">
+    <div class="admbar"><h2 id="admTitle">Administración</h2><button class="btn sm" id="admClose" type="button">Cerrar</button></div>
+    <p class="admstats" id="admStats"></p>
+    <input id="admSearch" type="search" placeholder="Buscar por mail" autocomplete="off" autocapitalize="none" spellcheck="false">
+    <p class="authmsg" id="admMsg" role="status" aria-live="polite"></p>
+    <div id="admList"></div>
+    <p class="admfoot">Para borrar una cuenta del todo o ver más datos, usá el panel de Supabase (Authentication → Users).</p>
+  </div>
+</div>
+<div class="auth" id="auth" role="dialog" aria-modal="true" aria-labelledby="authTitle">
   <div class="authbox">
     <div class="authbrand"><img class="logo" src="logo-96.png?v=7" alt="" width="40" height="40"><h1>Ghost<b>timer</b></h1></div>
     <p class="authload" id="authLoad">Cargando…</p>
@@ -1158,7 +1187,7 @@ if ("serviceWorker" in navigator) {
     newpass: { title: 'Elegí una contraseña nueva', go: 'Guardar contraseña', toggle: '' }
   };
   const redirect = location.href.split('#')[0].split('?')[0];
-  let mode = 'login', busy = false, lastCheck = 0, client = null;
+  let mode = 'login', busy = false, lastCheck = 0, client = null, myId = null;
 
   function panel(p){ $('authLoad').hidden = p !== 'load'; $('authForm').hidden = p !== 'form'; $('authBlocked').hidden = p !== 'blocked'; $('auth').hidden = false; document.body.style.overflow = 'hidden'; }
   function say(t, kind){ const m = $('authMsg'); m.textContent = t || ''; m.className = 'authmsg' + (kind ? ' ' + kind : ''); }
@@ -1189,16 +1218,16 @@ if ("serviceWorker" in navigator) {
 
   function openApp(email){
     A.ok = true; $('auth').hidden = true; document.body.style.overflow = '';
-    const lo = $('logout'); lo.hidden = false; lo.title = email ? 'Cuenta: ' + email : '';
+    const lo = $('logout'); lo.hidden = false; lo.title = email ? 'Cuenta: ' + email : ''; $('adminBtn').hidden = !A.admin;
     if (A.resume) A.resume();
   }
   function blocked(text, canRetry){
-    A.ok = false; $('blockedText').textContent = text; $('aRetry').hidden = !canRetry; $('logout').hidden = true; panel('blocked');
+    A.ok = false; A.admin = false; $('blockedText').textContent = text; $('aRetry').hidden = !canRetry; $('logout').hidden = true; $('adminBtn').hidden = true; $('admin').hidden = true; panel('blocked');
   }
   async function verify(session){
     lastCheck = Date.now();
     let res; const ac = new AbortController(), to = setTimeout(() => ac.abort(), 4000);
-    try { res = await client.from('profiles').select('activo').eq('id', session.user.id).abortSignal(ac.signal).maybeSingle(); }
+    try { res = await client.from('profiles').select('activo,es_admin').eq('id', session.user.id).abortSignal(ac.signal).maybeSingle(); }
     catch (e) { res = { error: { name: 'AuthRetryableFetchError', message: 'Failed to fetch' } }; }
     clearTimeout(to);
     const { data, error } = res;
@@ -1213,6 +1242,7 @@ if ("serviceWorker" in navigator) {
       clearOK(); blocked('Tu cuenta fue dada de baja. Si creés que es un error, escribinos.', false);
       return false;
     }
+    myId = session.user.id; A.admin = !!(data && data.es_admin);
     markOK(); openApp(session.user.email); return true;
   }
   async function boot(){
@@ -1238,8 +1268,56 @@ if ("serviceWorker" in navigator) {
   }
   async function signOutNow(){
     try { await client.auth.signOut(); } catch (e) {}
-    clearOK(); A.ok = false; $('logout').hidden = true; $('aPass').value = ''; setMode('login'); panel('form');
+    clearOK(); A.ok = false; A.admin = false; $('logout').hidden = true; $('adminBtn').hidden = true; $('admin').hidden = true; $('aPass').value = ''; setMode('login'); panel('form');
   }
+
+  // ---------- panel de administración ----------
+  let admRows = [], admQ = '', armed = null;
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  function admMsg(t, kind){ const m = $('admMsg'); m.textContent = t || ''; m.className = 'authmsg' + (kind ? ' ' + kind : ''); }
+  async function admLoad(){
+    admMsg('Cargando…');
+    const { data, error } = await client.from('profiles').select('id,email,activo,plan,vence,creado').order('creado', { ascending: false });
+    if (error) { admMsg('No pudimos cargar las cuentas.', 'err'); return; }
+    admRows = data || []; admMsg(''); admRender();
+  }
+  function admRender(){
+    const q = admQ.trim().toLowerCase(), list = $('admList'); list.textContent = '';
+    const rows = admRows.filter(r => !q || String(r.email || '').toLowerCase().includes(q));
+    $('admStats').textContent = admRows.length + ' cuentas · ' + admRows.filter(r => r.activo).length + ' activas · ' + admRows.filter(r => !r.activo).length + ' de baja · ' + admRows.filter(r => r.plan === 'pro').length + ' Pro';
+    rows.forEach(r => list.appendChild(admCard(r)));
+    if (!rows.length) list.appendChild(el('p', 'authmsg', 'No hay cuentas que coincidan.'));
+  }
+  function admCard(r){
+    const me = r.id === myId, card = el('div', 'admrow' + (r.activo ? '' : ' off'));
+    const top = el('div', 'admtop');
+    top.append(el('strong', 'admmail', r.email || '(sin mail)'), el('span', 'admtag', me ? 'Tu cuenta' : (r.activo ? 'Activa' : 'De baja')));
+    const meta = el('div', 'admmeta', 'Creada el ' + new Date(r.creado).toLocaleDateString('es-AR'));
+    const ctl = el('div', 'admctl');
+    const plan = el('select'); plan.setAttribute('aria-label', 'Plan de ' + r.email);
+    [['gratis', 'Gratis'], ['pro', 'Pro']].forEach(([v, t]) => { const o = el('option', null, t); o.value = v; if (r.plan === v) o.selected = true; plan.append(o); });
+    const vence = el('input'); vence.type = 'date'; vence.value = r.vence || ''; vence.title = 'Vence (opcional)'; vence.setAttribute('aria-label', 'Vencimiento de ' + r.email);
+    const tog = el('button', 'btn sm' + (r.activo ? '' : ' primary'), r.activo ? 'Dar de baja' : 'Reactivar'); tog.type = 'button'; tog.disabled = me;
+    plan.onchange = () => admSave(r, { plan: plan.value });
+    vence.onchange = () => admSave(r, { vence: vence.value || null });
+    tog.onclick = () => {
+      if (!r.activo) { admSave(r, { activo: true }); return; }
+      if (armed !== r.id) { armed = r.id; tog.textContent = '¿Seguro? Tocá de nuevo'; tog.classList.add('warn'); setTimeout(() => { if (armed === r.id) { armed = null; tog.textContent = 'Dar de baja'; tog.classList.remove('warn'); } }, 4000); return; }
+      armed = null; admSave(r, { activo: false });
+    };
+    ctl.append(plan, vence, tog); card.append(top, meta, ctl); return card;
+  }
+  async function admSave(r, patch){
+    admMsg('Guardando…');
+    const { data, error } = await client.from('profiles').update(patch).eq('id', r.id).select('id,email,activo,plan,vence,creado');
+    if (error || !data || !data.length) { await admLoad(); admMsg('No se pudo guardar. Probá de nuevo.', 'err'); return; }
+    Object.assign(r, data[0]); admMsg('Guardado.', 'ok'); admRender();
+  }
+  function admOpen(){ $('admin').hidden = false; document.body.style.overflow = 'hidden'; $('admSearch').value = ''; admQ = ''; admLoad(); }
+  function admClose(){ $('admin').hidden = true; document.body.style.overflow = ''; }
+  $('adminBtn').onclick = admOpen;
+  $('admClose').onclick = admClose;
+  $('admSearch').addEventListener('input', e => { admQ = e.target.value; admRender(); });
 
   $('authForm').addEventListener('submit', async e => {
     e.preventDefault(); if (busy) return;
