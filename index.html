@@ -73,6 +73,26 @@ body{background:var(--ground);color:var(--ink);font-family:var(--body);font-size
 .selbar[hidden]{display:none}
 .selbar .selinfo{font-family:var(--display);font-weight:700;font-size:14px;letter-spacing:.04em;margin-right:auto}
 .btn.sm{min-height:42px;padding:6px 11px;font-size:12px}
+.brand .sub{display:flex;align-items:baseline;gap:10px}
+.lo{background:none;border:0;padding:4px 2px;font-family:var(--display);font-weight:600;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);cursor:pointer}
+.auth{position:fixed;inset:0;z-index:1000;background:var(--ground);color:var(--ink);display:flex;align-items:center;justify-content:center;padding:20px;overflow:auto;font-family:var(--body)}
+.authbox{width:min(100%,380px);background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px;display:flex;flex-direction:column;gap:16px}
+.authbrand{display:flex;align-items:center;gap:10px}
+.authbrand h1{margin:0;font-family:var(--display);font-weight:700;font-size:26px;letter-spacing:.04em;text-transform:uppercase}
+.authbrand h1 b{color:var(--accent)}
+.authbox h2{margin:0;font-family:var(--display);font-weight:700;font-size:18px;letter-spacing:.04em;text-transform:uppercase}
+.authbox form{display:flex;flex-direction:column;gap:14px}
+.authbox label{display:flex;flex-direction:column;gap:6px;font-family:var(--display);font-weight:600;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.authbox input{font-family:var(--body);font-size:16px;min-height:46px;padding:8px 12px;border-radius:10px;border:1px solid var(--line);background:var(--panel-2);color:var(--ink);text-transform:none;letter-spacing:0}
+.authbox input:focus{outline:2px solid var(--accent);outline-offset:1px}
+.authmsg{margin:0;min-height:18px;font-size:14px;line-height:1.35;color:var(--muted)}
+.authmsg.err{color:#c0392b}
+.authmsg.ok{color:var(--good)}
+@media (prefers-color-scheme:dark){.authmsg.err{color:#ff8a7a}}
+.authlinks{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.linkbtn{background:none;border:0;padding:8px 2px;font-family:var(--body);font-size:14px;color:var(--accent);cursor:pointer;text-decoration:underline}
+.authload,.authblocked p{margin:0;font-size:15px;line-height:1.45}
+.authblocked{display:flex;flex-direction:column;gap:14px}
 @media (pointer:coarse){.keys{display:none}}
 kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 4px;background:var(--panel)}
 .side{display:flex;flex-direction:column;gap:12px;min-width:0}
@@ -123,7 +143,7 @@ select{font-family:var(--body);font-size:15px;min-height:44px;padding:6px 10px;b
 
 <div class="app">
   <header class="top">
-    <div class="brand"><img class="logo" src="logo-96.png?v=7" alt="" width="34" height="34"><div class="ttl"><h1>Ghost<b>timer</b></h1><span class="uses" id="uses" title="Videos procesados en este dispositivo">0 usos</span></div></div>
+    <div class="brand"><img class="logo" src="logo-96.png?v=7" alt="" width="34" height="34"><div class="ttl"><h1>Ghost<b>timer</b></h1><div class="sub"><span class="uses" id="uses" title="Videos procesados en este dispositivo">0 usos</span><button class="lo" id="logout" type="button" hidden>Salir</button></div></div></div>
     <input type="file" id="file" accept="video/*" hidden>
     <button class="btn primary" id="loadBtn" type="button">+ Video</button>
   </header>
@@ -249,6 +269,8 @@ select{font-family:var(--body);font-size:15px;min-height:44px;padding:6px 10px;b
 </div>
 
 <script src="mp4-muxer.js"></script>
+<script src="supabase.js"></script>
+<script>window.GT_AUTH = { ok: false, pending: null };</script>
 <video id="vid" playsinline webkit-playsinline preload="auto" aria-hidden="true" style="position:fixed;left:0;bottom:0;width:4px;height:4px;opacity:.01;pointer-events:none;z-index:-1"></video>
 
 <script>
@@ -753,7 +775,9 @@ function addUse(){
   showUses(); usesRemote(true);
 }
 showUses(); usesRemote(false);
+window.GT_AUTH.resume = () => { if (GT_AUTH.pending) { const f = GT_AUTH.pending; GT_AUTH.pending = null; loadFile(f); } };
 async function loadFile(file){
+  if (window.GT_AUTH && !GT_AUTH.ok) { GT_AUTH.pending = file; return; }
   if (!file || !file.type.startsWith('video') && !/\.(mp4|mov|m4v|webm|mkv)$/i.test(file.name)) { msg('Ese archivo no parece un video. Probá con un .mp4 o .mov.', 'warn'); return; }
   if (S.url) URL.revokeObjectURL(S.url);
   S.url = URL.createObjectURL(file); S.name = file.name.replace(/\.[^.]+$/, '');
@@ -1099,4 +1123,167 @@ if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).then(r => r.update()).catch(() => {});
   });
 }
-</script></body></html>
+</script><div class="auth" id="auth" role="dialog" aria-modal="true" aria-labelledby="authTitle">
+  <div class="authbox">
+    <div class="authbrand"><img class="logo" src="logo-96.png?v=7" alt="" width="40" height="40"><h1>Ghost<b>timer</b></h1></div>
+    <p class="authload" id="authLoad">Cargando…</p>
+    <form id="authForm" hidden novalidate>
+      <h2 id="authTitle">Ingresar</h2>
+      <label id="aMailWrap">Mail<input id="aMail" type="email" autocomplete="email" inputmode="email" autocapitalize="none" spellcheck="false"></label>
+      <label id="aPassWrap">Contraseña<input id="aPass" type="password" autocomplete="current-password"></label>
+      <p class="authmsg" id="authMsg" role="status" aria-live="polite"></p>
+      <button class="btn primary" id="aGo" type="submit">Ingresar</button>
+      <div class="authlinks">
+        <button class="linkbtn" id="aToggle" type="button">Crear cuenta</button>
+        <button class="linkbtn" id="aForgot" type="button">Olvidé mi contraseña</button>
+      </div>
+    </form>
+    <div class="authblocked" id="authBlocked" hidden>
+      <p id="blockedText"></p>
+      <button class="btn primary" id="aRetry" type="button">Reintentar</button>
+      <button class="btn" id="aOut" type="button">Volver al ingreso</button>
+    </div>
+  </div>
+</div>
+<script>
+(() => {
+  const SB_URL = 'https://gahpbqiayxqprzchhhyg.supabase.co';
+  const SB_KEY = 'sb_publishable_6twdFFLTQf3nuwjSY8eqQg_Pc6xKx2I';
+  const $ = id => document.getElementById(id), A = window.GT_AUTH;
+  const VERIFIED = 'ghosttimer.verified', GRACE = 7 * 24 * 3600 * 1000;
+  const TXT = {
+    login:   { title: 'Ingresar',                   go: 'Ingresar',           toggle: 'Crear cuenta' },
+    signup:  { title: 'Crear cuenta',               go: 'Crear cuenta',       toggle: 'Ya tengo cuenta' },
+    reset:   { title: 'Recuperar contraseña',       go: 'Enviarme el link',   toggle: 'Volver' },
+    newpass: { title: 'Elegí una contraseña nueva', go: 'Guardar contraseña', toggle: '' }
+  };
+  const redirect = location.href.split('#')[0].split('?')[0];
+  let mode = 'login', busy = false, lastCheck = 0, client = null;
+
+  function panel(p){ $('authLoad').hidden = p !== 'load'; $('authForm').hidden = p !== 'form'; $('authBlocked').hidden = p !== 'blocked'; $('auth').hidden = false; document.body.style.overflow = 'hidden'; }
+  function say(t, kind){ const m = $('authMsg'); m.textContent = t || ''; m.className = 'authmsg' + (kind ? ' ' + kind : ''); }
+  function setMode(m){
+    mode = m; const t = TXT[m];
+    $('authTitle').textContent = t.title; $('aGo').textContent = t.go;
+    $('aPassWrap').hidden = m === 'reset'; $('aMailWrap').hidden = m === 'newpass';
+    $('aPass').autocomplete = m === 'login' ? 'current-password' : 'new-password';
+    $('aToggle').hidden = m === 'newpass'; $('aToggle').textContent = t.toggle;
+    $('aForgot').hidden = m !== 'login';
+    say('');
+  }
+  function friendly(e){
+    const c = String((e && (e.code || e.error_code)) || ''), m = String((e && e.message) || '').toLowerCase();
+    if (c === 'invalid_credentials' || m.includes('invalid login')) return 'Mail o contraseña incorrectos.';
+    if (c === 'email_not_confirmed' || m.includes('not confirmed')) return 'Todavía no confirmaste tu mail. Revisá tu bandeja de entrada y el spam.';
+    if (c === 'user_banned' || m.includes('banned')) return 'Tu cuenta fue dada de baja.';
+    if (c === 'user_already_exists' || m.includes('already registered')) return 'Ya existe una cuenta con ese mail.';
+    if (c === 'weak_password' || m.includes('password should')) return 'La contraseña es muy débil. Usá al menos 8 caracteres.';
+    if (c === 'same_password' || m.includes('different from the old')) return 'Elegí una contraseña distinta de la anterior.';
+    if (c.includes('rate_limit') || m.includes('rate limit')) return 'Hiciste demasiados intentos. Esperá unos minutos y probá de nuevo.';
+    if (m.includes('failed to fetch') || m.includes('network') || (e && e.name === 'AuthRetryableFetchError')) return 'No hay conexión. Revisá tu internet y probá de nuevo.';
+    return 'No pudimos completar la acción. Probá de nuevo en unos minutos.';
+  }
+  const graceOK = () => { try { const v = JSON.parse(localStorage.getItem(VERIFIED) || 'null'); return !!v && Date.now() - v.t < GRACE; } catch (e) { return false; } };
+  const markOK = () => { try { localStorage.setItem(VERIFIED, JSON.stringify({ t: Date.now() })); } catch (e) {} };
+  const clearOK = () => { try { localStorage.removeItem(VERIFIED); } catch (e) {} };
+
+  function openApp(email){
+    A.ok = true; $('auth').hidden = true; document.body.style.overflow = '';
+    const lo = $('logout'); lo.hidden = false; lo.title = email ? 'Cuenta: ' + email : '';
+    if (A.resume) A.resume();
+  }
+  function blocked(text, canRetry){
+    A.ok = false; $('blockedText').textContent = text; $('aRetry').hidden = !canRetry; $('logout').hidden = true; panel('blocked');
+  }
+  async function verify(session){
+    lastCheck = Date.now();
+    let res; const ac = new AbortController(), to = setTimeout(() => ac.abort(), 4000);
+    try { res = await client.from('profiles').select('activo').eq('id', session.user.id).abortSignal(ac.signal).maybeSingle(); }
+    catch (e) { res = { error: { name: 'AuthRetryableFetchError', message: 'Failed to fetch' } }; }
+    clearTimeout(to);
+    const { data, error } = res;
+    if (error) {
+      const net = /fetch|network|abort/i.test((error.message || '') + ' ' + (error.name || '')) || error.name === 'AuthRetryableFetchError';
+      if (net && graceOK()) { openApp(session.user.email); return true; }
+      blocked(net ? 'Necesitamos conexión a internet para verificar tu cuenta.' : 'No pudimos verificar tu cuenta. Probá de nuevo en unos minutos.', true);
+      return false;
+    }
+    if (data && data.activo === false) {
+      try { await client.auth.signOut(); } catch (e) {}
+      clearOK(); blocked('Tu cuenta fue dada de baja. Si creés que es un error, escribinos.', false);
+      return false;
+    }
+    markOK(); openApp(session.user.email); return true;
+  }
+  async function boot(){
+    panel('load');
+    if (/type=recovery/.test(location.hash)) { setMode('newpass'); panel('form'); return; }
+    let timedOut = false;
+    try {
+      const r = await Promise.race([client.auth.getSession(), new Promise(ok => setTimeout(() => ok(null), 6000))]);
+      if (r === null) timedOut = true;
+      else if (r.data && r.data.session) { await verify(r.data.session); return; }
+    } catch (e) {}
+    if ((timedOut || !navigator.onLine) && graceOK()) { openApp(''); return; }
+    setMode('login'); panel('form');
+  }
+  async function recheck(){
+    if (!A.ok || Date.now() - lastCheck < 60000) return;
+    lastCheck = Date.now();
+    try {
+      const { data } = await client.auth.getSession();
+      if (data && data.session) await verify(data.session);
+      else if (navigator.onLine) { A.ok = false; $('logout').hidden = true; setMode('login'); panel('form'); }
+    } catch (e) {}
+  }
+  async function signOutNow(){
+    try { await client.auth.signOut(); } catch (e) {}
+    clearOK(); A.ok = false; $('logout').hidden = true; $('aPass').value = ''; setMode('login'); panel('form');
+  }
+
+  $('authForm').addEventListener('submit', async e => {
+    e.preventDefault(); if (busy) return;
+    const email = $('aMail').value.trim(), pass = $('aPass').value;
+    if (mode !== 'newpass' && !/^\S+@\S+\.\S+$/.test(email)) return say('Escribí un mail válido.', 'err');
+    if (mode === 'login' && !pass) return say('Escribí tu contraseña.', 'err');
+    if ((mode === 'signup' || mode === 'newpass') && pass.length < 8) return say('La contraseña debe tener al menos 8 caracteres.', 'err');
+    busy = true; $('aGo').disabled = true; say('Un momento…');
+    try {
+      if (mode === 'login') {
+        const { data, error } = await client.auth.signInWithPassword({ email, password: pass });
+        if (error) throw error;
+        $('aPass').value = ''; await verify(data.session);
+      } else if (mode === 'signup') {
+        const { data, error } = await client.auth.signUp({ email, password: pass, options: { emailRedirectTo: redirect } });
+        if (error) throw error;
+        if (data.user && Array.isArray(data.user.identities) && !data.user.identities.length) say('Ya existe una cuenta con ese mail.', 'err');
+        else if (data.session) { $('aPass').value = ''; await verify(data.session); }
+        else { $('aPass').value = ''; setMode('login'); say('Listo. Te mandamos un mail para confirmar la cuenta. Después volvé acá e ingresá.', 'ok'); }
+      } else if (mode === 'reset') {
+        const { error } = await client.auth.resetPasswordForEmail(email, { redirectTo: redirect });
+        if (error) throw error;
+        setMode('login'); say('Si ese mail tiene cuenta, te enviamos un link para elegir una contraseña nueva.', 'ok');
+      } else if (mode === 'newpass') {
+        const { error } = await client.auth.updateUser({ password: pass });
+        if (error) throw error;
+        $('aPass').value = ''; history.replaceState(null, '', redirect);
+        const { data } = await client.auth.getSession(); if (data && data.session) await verify(data.session);
+      }
+    } catch (err) { say(friendly(err), 'err'); }
+    busy = false; $('aGo').disabled = false;
+  });
+  $('aToggle').onclick = () => setMode(mode === 'login' ? 'signup' : 'login');
+  $('aForgot').onclick = () => setMode('reset');
+  $('logout').onclick = signOutNow;
+  $('aOut').onclick = signOutNow;
+  $('aRetry').onclick = boot;
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) recheck(); });
+  setInterval(() => { if (!document.hidden) recheck(); }, 5 * 60000);
+
+  if (!window.supabase || !window.supabase.createClient) { blocked('No se pudo cargar el ingreso. Recargá la página.', true); return; }
+  client = window.supabase.createClient(SB_URL, SB_KEY, { auth: { storageKey: 'ghosttimer.auth', persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+  client.auth.onAuthStateChange(ev => { if (ev === 'PASSWORD_RECOVERY') setTimeout(() => { A.ok = false; setMode('newpass'); panel('form'); }, 0); });
+  boot();
+})();
+</script>
+</body></html>
