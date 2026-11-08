@@ -831,6 +831,7 @@ stage.addEventListener('click', () => { if (S.demo) $('file').click(); else togg
 // ---------- audio routing (for playback + export) ----------
 let AC = null, srcNode = null, recDest = null;
 function ensureAudio(){
+  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
   if (AC) { if (AC.state === 'suspended') AC.resume(); return; }
   const C = window.AudioContext || window.webkitAudioContext;
   AC = new C(); srcNode = AC.createMediaElementSource(vid); recDest = AC.createMediaStreamDestination();
@@ -840,7 +841,6 @@ function ensureAudio(){
 // ---------- transport ----------
 function togglePlay(){
   if (S.demo || S.exporting) return;
-  ensureAudio();
   if (vid.paused) vid.play(); else vid.pause();
 }
 vid.onplay = () => $('playBtn').textContent = '❚❚ Pausa';
@@ -1037,7 +1037,6 @@ async function exportMp4(){
 }
 async function exportAny(){
   if (S.demo || S.exporting) return;
-  ensureAudio();
   $('saveBtn').hidden = true;
   if (window.VideoEncoder && window.VideoFrame && window.Mp4Muxer) {
     try { if (await exportMp4()) return; }
@@ -1074,6 +1073,13 @@ $('saveBtn').onclick = async () => {
   if (dl) {
     try { await dl.save({ filename, data: S.blob }); msg('Video guardado.', 'ok'); return; }
     catch (e) { if (e && e.code === 'declined') { msg('Guardado cancelado.'); return; } if (e && e.code === 'rate_limited') { msg('Ya hay una ventana de guardado abierta.'); return; } }
+  }
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  if (isIOS && navigator.canShare && navigator.share) {
+    try {
+      const file = new File([S.blob], filename, { type: S.blob.type || 'video/mp4' });
+      if (navigator.canShare({ files: [file] })) { await navigator.share({ files: [file] }); msg('Listo. Elegí \"Guardar video\" para dejarlo en Fotos.', 'ok'); return; }
+    } catch (e) { if (e && e.name === 'AbortError') { msg('Guardado cancelado.'); return; } }
   }
   const a = document.createElement('a'); a.href = URL.createObjectURL(S.blob); a.download = filename; document.body.appendChild(a); a.click(); a.remove();
 };
