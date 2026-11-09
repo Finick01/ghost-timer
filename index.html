@@ -800,7 +800,7 @@ async function loadFile(file){
   if (!file || !file.type.startsWith('video') && !/\.(mp4|mov|m4v|webm|mkv)$/i.test(file.name)) { msg('Ese archivo no parece un video. Probá con un .mp4 o .mov.', 'warn'); return; }
   if (S.url) URL.revokeObjectURL(S.url);
   S.url = URL.createObjectURL(file); S.name = file.name.replace(/\.[^.]+$/, '');
-  S.blob = null; $('saveBtn').hidden = true;
+  S.blob = null; S.file = file; $('saveBtn').hidden = true;
   vid.src = S.url; vid.load();
   await new Promise((res, rej) => { vid.onloadedmetadata = res; vid.onerror = () => rej(new Error('video')); }).catch(() => { msg('El navegador no puede abrir este video. Probá exportarlo como .mp4 (H.264).', 'warn'); throw 0; });
   S.demo = false; S.forcedBeep = null; $('demoBadge').hidden = true; $('statusLbl').textContent = file.name;
@@ -965,6 +965,77 @@ async function sliceAudio48k(a, b){
   const src = oc.createBufferSource(); src.buffer = buf; src.connect(oc.destination); src.start(0, a, b - a);
   return await oc.startRendering();
 }
+// ---------- audio sin AudioEncoder (iPhone viejo): copia el AAC original al MP4 ----------
+async function demuxAacRange(file, a, b){
+  if (!file) return null;
+  const rd = async (st, en) => new DataView(await file.slice(st, en).arrayBuffer());
+  let pos = 0, moov = null;
+  while (pos + 8 <= file.size) {
+    const h = await rd(pos, Math.min(pos + 16, file.size));
+    let size = h.getUint32(0); const type = String.fromCharCode(h.getUint8(4), h.getUint8(5), h.getUint8(6), h.getUint8(7));
+    let hdr = 8;
+    if (size === 1) { size = Number(h.getBigUint64(8)); hdr = 16; } else if (size === 0) size = file.size - pos;
+    if (size < hdr) return null;
+    if (type === 'moov') { if (size > 96 * 1048576) return null; moov = await file.slice(pos + hdr, pos + size).arrayBuffer(); break; }
+    pos += size;
+  }
+  if (!moov) return null;
+  const u8 = new Uint8Array(moov), dv = new DataView(moov);
+  const tag = o => String.fromCharCode(u8[o], u8[o + 1], u8[o + 2], u8[o + 3]);
+  const kids = (st, en) => { const out = []; let o = st; while (o + 8 <= en) { let sz = dv.getUint32(o), hd = 8; if (sz === 1) { sz = Number(dv.getBigUint64(o + 8)); hd = 16; } else if (sz === 0) sz = en - o; if (sz < hd || o + sz > en) break; out.push({ t: tag(o + 4), s: o + hd, e: o + sz }); o += sz; } return out; };
+  const find = (box, t) => box && kids(box.s, box.e).find(k => k.t === t);
+  const rdLen = o => { let l = 0, c, n = 0; do { c = u8[o++]; l = (l << 7) | (c & 127); n++; } while ((c & 128) && n < 4); return [l, o]; };
+  for (const trak of kids(0, moov.byteLength).filter(k => k.t === 'trak')) {
+    const mdia = find(trak, 'mdia'), hdlr = find(mdia, 'hdlr'), mdhd = find(mdia, 'mdhd');
+    if (!hdlr || !mdhd || tag(hdlr.s + 8) !== 'soun') continue;
+    const timescale = dv.getUint32(mdhd.s + (u8[mdhd.s] === 1 ? 20 : 12));
+    const stbl = find(find(mdia, 'minf'), 'stbl'); if (!stbl || !timescale) return null;
+    const stsd = find(stbl, 'stsd'), stts = find(stbl, 'stts'), stsc = find(stbl, 'stsc'), stsz = find(stbl, 'stsz');
+    const stco = find(stbl, 'stco'), co64 = find(stbl, 'co64');
+    if (!stsd || !stts || !stsc || !stsz || !(stco || co64)) return null;
+    const eS = stsd.s + 8, eE = Math.min(stsd.e, eS + dv.getUint32(eS));
+    if (tag(eS + 4) !== 'mp4a') return null;
+    let ei = -1; for (let i = eS; i + 4 <= eE; i++) if (tag(i) === 'esds') { ei = i; break; }
+    if (ei < 0) return null;
+    let o = ei + 8, o2;
+    if (u8[o] !== 3) return null; [, o2] = rdLen(o + 1); o = o2 + 2;
+    const fl = u8[o++]; if (fl & 0x80) o += 2; if (fl & 0x40) o += 1 + u8[o]; if (fl & 0x20) o += 2;
+    if (u8[o] !== 4) return null; [, o2] = rdLen(o + 1); if (u8[o2] !== 0x40) return null; o = o2 + 13;
+    if (u8[o] !== 5) return null; let l; [l, o2] = rdLen(o + 1);
+    const asc = u8.slice(o2, o2 + l);
+    if ((asc[0] >> 3) !== 2) return null; // solo AAC-LC
+    const RATES = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350];
+    const fi = ((asc[0] & 7) << 1) | (asc[1] >> 7), channels = (asc[1] >> 3) & 15;
+    if (fi > 12 || (channels !== 1 && channels !== 2)) return null;
+    const sampleRate = RATES[fi];
+    const n = dv.getUint32(stsz.s + 8), fixed = dv.getUint32(stsz.s + 4);
+    const sz = new Array(n), off = new Array(n), dts = new Array(n), dur = new Array(n);
+    for (let i = 0; i < n; i++) sz[i] = fixed || dv.getUint32(stsz.s + 12 + i * 4);
+    let si = 0, t = 0; const nt = dv.getUint32(stts.s + 4);
+    for (let i = 0; i < nt; i++) { const cnt = dv.getUint32(stts.s + 8 + i * 8), d = dv.getUint32(stts.s + 12 + i * 8); for (let k = 0; k < cnt && si < n; k++) { dts[si] = t; dur[si] = d; t += d; si++; } }
+    const nc = dv.getUint32((stco || co64).s + 4), nsc = dv.getUint32(stsc.s + 4), sc = [];
+    for (let i = 0; i < nsc; i++) sc.push([dv.getUint32(stsc.s + 8 + i * 12), dv.getUint32(stsc.s + 12 + i * 12)]);
+    let e = 0, k = 0;
+    for (let ci = 0; ci < nc; ci++) {
+      while (e + 1 < sc.length && sc[e + 1][0] <= ci + 1) e++;
+      let po = stco ? dv.getUint32(stco.s + 8 + ci * 4) : Number(dv.getBigUint64(co64.s + 8 + ci * 8));
+      for (let j = 0; j < sc[e][1] && k < n; j++) { off[k] = po; po += sz[k]; k++; }
+    }
+    if (k < n || si < n) return null;
+    const pick = []; for (let i = 0; i < n; i++) { const st = dts[i] / timescale, en = (dts[i] + dur[i]) / timescale; if (en > a && st < b) pick.push(i); }
+    if (!pick.length) return null;
+    const samples = []; let g = 0;
+    while (g < pick.length) {
+      let h = g; while (h + 1 < pick.length && pick[h + 1] === pick[h] + 1 && off[pick[h + 1]] === off[pick[h]] + sz[pick[h]]) h++;
+      const i0 = pick[g], i1 = pick[h], buf = await file.slice(off[i0], off[i1] + sz[i1]).arrayBuffer();
+      let bo = 0;
+      for (let q = g; q <= h; q++) { const i = pick[q]; samples.push({ data: new Uint8Array(buf, bo, sz[i]), ts: Math.max(0, Math.round((dts[i] / timescale - a) * 1e6)), dur: Math.round(dur[i] / timescale * 1e6) }); bo += sz[i]; }
+      g = h + 1;
+    }
+    return { sampleRate, channels, asc, samples };
+  }
+  return null;
+}
 async function exportMp4(){
   const W = cv.width & ~1, H = cv.height & ~1;
   const vcodec = await pickVideoCodec(W, H);
@@ -975,11 +1046,13 @@ async function exportMp4(){
   if (navigator.wakeLock) navigator.wakeLock.request('screen').then(w => wake = w).catch(() => {});
   let audio = null, acodec = null;
   try { audio = await sliceAudio48k(a, b); acodec = audio ? await pickAudioCodec(audio.numberOfChannels) : null; } catch (e) { audio = null; }
+  let pass = null; // sin codificador de audio (iPhone con iOS viejo): se copia el AAC original
+  if (!acodec) { try { pass = await demuxAacRange(S.file, a, b); } catch (e) { pass = null; console.error(e); } }
   const target = new Mp4Muxer.ArrayBufferTarget();
   const muxer = new Mp4Muxer.Muxer({
     target, fastStart: 'in-memory', firstTimestampBehavior: 'offset',
     video: { codec: vcodec.mux, width: W, height: H, frameRate: FPS },
-    audio: acodec ? { codec: acodec.mux, numberOfChannels: audio.numberOfChannels, sampleRate: 48000 } : undefined
+    audio: acodec ? { codec: acodec.mux, numberOfChannels: audio.numberOfChannels, sampleRate: 48000 } : pass ? { codec: 'aac', numberOfChannels: pass.channels, sampleRate: pass.sampleRate } : undefined
   });
   let encErr = null;
   const venc = new VideoEncoder({ output: (c, m) => muxer.addVideoChunk(c, m), error: e => encErr = e });
@@ -1024,6 +1097,8 @@ async function exportMp4(){
       aenc.encode(ad); ad.close();
     }
     await aenc.flush(); aenc.close();
+  } else if (pass) {
+    pass.samples.forEach((sm, i) => muxer.addAudioChunkRaw(sm.data, 'key', sm.ts, sm.dur, i ? undefined : { decoderConfig: { codec: 'mp4a.40.2', numberOfChannels: pass.channels, sampleRate: pass.sampleRate, description: pass.asc } }));
   }
   muxer.finalize();
   S.blob = new Blob([target.buffer], { type: 'video/mp4' }); S.ext = 'mp4';
@@ -1031,7 +1106,7 @@ async function exportMp4(){
   if (wake) { try { wake.release(); } catch (e) {} wake = null; }
   $('saveBtn').hidden = false;
   $('saveBtn').textContent = `Guardar video (.mp4, ${(S.blob.size / 1048576).toFixed(1)} MB, ${(b - a).toFixed(1)} s)`;
-  msg(acodec ? 'Listo. Tocá "Guardar video" para bajarlo.' : 'Listo, pero este teléfono no pudo agregar el sonido. Tocá "Guardar video".', acodec ? 'ok' : 'warn');
+  msg((acodec || pass) ? 'Listo. Tocá "Guardar video" para bajarlo.' : 'Listo, pero este teléfono no pudo agregar el sonido. Tocá "Guardar video".', (acodec || pass) ? 'ok' : 'warn');
   drawStage();
   return true;
 }
