@@ -330,15 +330,34 @@ let demoT = 0, demoStart = performance.now();
 function msg(text, kind){ const m = $('msg'); m.textContent = text; m.className = 'msg' + (kind ? ' ' + kind : ''); }
 function sortedShots(){ return S.shots.slice().sort((a, b) => a - b); }
 
+// Arma un .m4a (solo audio) con el AAC del video: Safari de iPhone a veces no puede leer el audio dentro de un video
+async function audioOnlyM4a(file){
+  const r = await demuxAacRange(file, 0, Infinity, false);
+  if (!r || !window.Mp4Muxer) return null;
+  const target = new Mp4Muxer.ArrayBufferTarget();
+  const mux = new Mp4Muxer.Muxer({ target, fastStart: 'in-memory', firstTimestampBehavior: 'offset', audio: { codec: 'aac', numberOfChannels: r.channels, sampleRate: r.sampleRate } });
+  r.samples.forEach((sm, i) => mux.addAudioChunkRaw(sm.data, 'key', sm.ts, sm.dur, i ? undefined : { decoderConfig: { codec: 'mp4a.40.2', numberOfChannels: r.channels, sampleRate: r.sampleRate, description: r.asc } }));
+  mux.finalize();
+  return { buf: target.buffer, skip: r.skip };
+}
+
 // ---------- analysis ----------
 async function analyze(file){
   msg('Leyendo el audio del video…');
-  const buf = await file.arrayBuffer();
   const AC = window.AudioContext || window.webkitAudioContext;
-  const ac = new AC();
-  let ab;
-  try { ab = await ac.decodeAudioData(buf); }
-  finally { try { ac.close(); } catch(e){} }
+  const decode = async buf => { const ac = new AC(); try { return await new Promise((res, rej) => { const pr = ac.decodeAudioData(buf, res, rej); if (pr && pr.catch) pr.catch(rej); }); } finally { try { ac.close(); } catch(e){} } };
+  let ab = null;
+  try { ab = await decode(await file.arrayBuffer()); } catch (e) { ab = null; }
+  if (!ab) { // iPhone: si no puede leer el audio dentro del video, se lo da solo
+    msg('Leyendo el audio del video (método 2)…');
+    const r = await audioOnlyM4a(file);
+    if (r) {
+      ab = await decode(r.buf);
+      const n = Math.round(r.skip * ab.sampleRate); // descartar el relleno del codificador, como hace el reproductor
+      if (n > 0 && n < ab.length) { const ac2 = new AC(); try { const out = ac2.createBuffer(ab.numberOfChannels, ab.length - n, ab.sampleRate); for (let c = 0; c < ab.numberOfChannels; c++) out.copyToChannel(ab.getChannelData(c).subarray(n), c); ab = out; } finally { try { ac2.close(); } catch (e) {} } }
+    }
+  }
+  if (!ab) throw new Error('audio');
   const sr = ab.sampleRate, len = ab.length, chs = [];
   for (let c = 0; c < ab.numberOfChannels; c++) chs.push(ab.getChannelData(c));
   const mono = new Float32Array(len);
@@ -966,7 +985,7 @@ async function sliceAudio48k(a, b){
   return await oc.startRendering();
 }
 // ---------- audio sin AudioEncoder (iPhone viejo): copia el AAC original al MP4 ----------
-async function demuxAacRange(file, a, b){
+async function demuxAacRange(file, a, b, shift = true){
   if (!file) return null;
   const rd = async (st, en) => new DataView(await file.slice(st, en).arrayBuffer());
   let pos = 0, moov = null;
@@ -990,6 +1009,18 @@ async function demuxAacRange(file, a, b){
     if (!hdlr || !mdhd || tag(hdlr.s + 8) !== 'soun') continue;
     const timescale = dv.getUint32(mdhd.s + (u8[mdhd.s] === 1 ? 20 : 12));
     const stbl = find(find(mdia, 'minf'), 'stbl'); if (!stbl || !timescale) return null;
+    let skip = 0; // relleno del codificador (priming) que el reproductor descarta por la edit list
+    try {
+      const elst = find(find(trak, 'edts'), 'elst');
+      if (elst) {
+        const v1 = u8[elst.s] === 1, cnt = dv.getUint32(elst.s + 4);
+        for (let q = 0, eo = elst.s + 8; q < cnt; q++, eo += v1 ? 20 : 12) {
+          const mt = v1 ? Number(dv.getBigInt64(eo + 8)) : dv.getInt32(eo + 4);
+          if (mt >= 0) { skip = mt / timescale; break; }
+        }
+      }
+    } catch (e) { skip = 0; }
+    const sk = shift ? skip : 0;
     const stsd = find(stbl, 'stsd'), stts = find(stbl, 'stts'), stsc = find(stbl, 'stsc'), stsz = find(stbl, 'stsz');
     const stco = find(stbl, 'stco'), co64 = find(stbl, 'co64');
     if (!stsd || !stts || !stsc || !stsz || !(stco || co64)) return null;
@@ -1003,11 +1034,14 @@ async function demuxAacRange(file, a, b){
     if (u8[o] !== 4) return null; [, o2] = rdLen(o + 1); if (u8[o2] !== 0x40) return null; o = o2 + 13;
     if (u8[o] !== 5) return null; let l; [l, o2] = rdLen(o + 1);
     const asc = u8.slice(o2, o2 + l);
-    if ((asc[0] >> 3) !== 2) return null; // solo AAC-LC
     const RATES = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350];
-    const fi = ((asc[0] & 7) << 1) | (asc[1] >> 7), channels = (asc[1] >> 3) & 15;
-    if (fi > 12 || (channels !== 1 && channels !== 2)) return null;
-    const sampleRate = RATES[fi];
+    let bp = 0; const bits = nb => { let v = 0; for (let q = 0; q < nb; q++, bp++) v = (v << 1) | ((asc[bp >> 3] >> (7 - (bp & 7))) & 1); return v; };
+    let ot = bits(5); if (ot === 31) ot = 32 + bits(6);
+    const fi = bits(4); if (fi > 12) return null;
+    let channels = bits(4), extFi = -1;
+    if (ot === 5 || ot === 29) { if (ot === 29) channels = 2; extFi = bits(4); if (extFi > 12) return null; ot = bits(5); } // HE-AAC / HE-AACv2
+    if (ot !== 2 || (channels !== 1 && channels !== 2)) return null; // AAC-LC o HE-AAC
+    const sampleRate = RATES.includes(timescale) ? timescale : RATES[extFi >= 0 ? extFi : fi];
     const n = dv.getUint32(stsz.s + 8), fixed = dv.getUint32(stsz.s + 4);
     const sz = new Array(n), off = new Array(n), dts = new Array(n), dur = new Array(n);
     for (let i = 0; i < n; i++) sz[i] = fixed || dv.getUint32(stsz.s + 12 + i * 4);
@@ -1022,17 +1056,21 @@ async function demuxAacRange(file, a, b){
       for (let j = 0; j < sc[e][1] && k < n; j++) { off[k] = po; po += sz[k]; k++; }
     }
     if (k < n || si < n) return null;
-    const pick = []; for (let i = 0; i < n; i++) { const st = dts[i] / timescale, en = (dts[i] + dur[i]) / timescale; if (en > a && st < b) pick.push(i); }
+    // primer bloque: el que mas se acerca al instante `a` (el muxer no admite huecos al inicio); desde ahi, bloques seguidos
+    let f = -1, best = Infinity;
+    for (let i = 0; i < n; i++) { const st = dts[i] / timescale - sk; if (st >= b) break; const er = Math.abs(st - a); if (er < best) { best = er; f = i; } }
+    if (f < 0) return null;
+    const pick = []; for (let i = f; i < n && dts[i] / timescale - sk < b; i++) pick.push(i);
     if (!pick.length) return null;
     const samples = []; let g = 0;
     while (g < pick.length) {
       let h = g; while (h + 1 < pick.length && pick[h + 1] === pick[h] + 1 && off[pick[h + 1]] === off[pick[h]] + sz[pick[h]]) h++;
       const i0 = pick[g], i1 = pick[h], buf = await file.slice(off[i0], off[i1] + sz[i1]).arrayBuffer();
       let bo = 0;
-      for (let q = g; q <= h; q++) { const i = pick[q]; samples.push({ data: new Uint8Array(buf, bo, sz[i]), ts: Math.max(0, Math.round((dts[i] / timescale - a) * 1e6)), dur: Math.round(dur[i] / timescale * 1e6) }); bo += sz[i]; }
+      for (let q = g; q <= h; q++) { const i = pick[q]; samples.push({ data: new Uint8Array(buf, bo, sz[i]), ts: Math.round((dts[i] - dts[f]) / timescale * 1e6), dur: Math.round(dur[i] / timescale * 1e6) }); bo += sz[i]; }
       g = h + 1;
     }
-    return { sampleRate, channels, asc, samples };
+    return { sampleRate, channels, asc, samples, skip };
   }
   return null;
 }
