@@ -1081,6 +1081,7 @@ async function exportMp4(){
   const [a, b0] = exportRange(); const b = Math.min(b0, (vid.duration || S.dur) - 0.02);
   S.exportStart = a; S.exportEnd = b;
   S.exporting = true; setExportUI(true);
+  const tStart = performance.now();
   if (navigator.wakeLock) navigator.wakeLock.request('screen').then(w => wake = w).catch(() => {});
   // audio: primero se copia el AAC original (no depende del navegador); si no se puede, se recodifica
   let pass = null, audio = null, acodec = null;
@@ -1098,27 +1099,69 @@ async function exportMp4(){
   // video frames: play the clip muted and grab every decoded frame
   const wasMuted = vid.muted; vid.muted = true; vid.pause();
   vid.currentTime = a; await new Promise(r => vid.addEventListener('seeked', r, { once: true }));
-  let n = 0, lastT = -1;
+  const rvfc = 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
+  const seekTo = async t => {
+    if (Math.abs(vid.currentTime - t) < 1e-4) return;
+    const sk = new Promise(r => vid.addEventListener('seeked', r, { once: true }));
+    vid.currentTime = t;
+    await Promise.race([sk, new Promise(r => setTimeout(r, 2500))]);
+  };
+  // prueba rapida (1 s): ¿el telefono puede capturar todos los cuadros en tiempo real? si no, se graba cuadro a cuadro
+  let stepMode = false;
+  if (rvfc) {
+    let cnt = 0, m0 = null, m1 = null;
+    await new Promise(res => {
+      const t0 = performance.now();
+      const cb = (_, meta) => { cnt++; if (m0 === null) m0 = meta.mediaTime; m1 = meta.mediaTime; drawStage(meta.mediaTime); try { new VideoFrame(cv, { timestamp: 0 }).close(); } catch (e) {} if (performance.now() - t0 > 1200) res(); else vid.requestVideoFrameCallback(cb); };
+      vid.requestVideoFrameCallback(cb); vid.play().catch(() => {}); setTimeout(res, 2500);
+    });
+    vid.pause();
+    stepMode = cnt < 3 || (m1 - m0) < 0.3 || cnt < 0.7 * 24 * (m1 - m0);
+    await seekTo(a);
+  }
+  let n = 0, lastT = stepMode ? a - 1 / FPS : -1, lastWall = performance.now();
+  const wallStart = lastWall;
   const grab = t => {
     if (t <= lastT || t > b + 0.001) return;
-    lastT = t; drawStage(t);
+    lastT = t; lastWall = performance.now(); drawStage(t);
     if (venc.encodeQueueSize > 8) return;
     const f = new VideoFrame(cv, { timestamp: Math.round((t - a) * 1e6), duration: Math.round(1e6 / FPS) });
     venc.encode(f, { keyFrame: n % (FPS * 2) === 0 }); f.close(); n++;
     $('barFill').style.width = Math.min(100, (t - a) / (b - a) * 100) + '%';
   };
-  await new Promise(resolve => {
+  if (!stepMode) await new Promise(resolve => {
     let done = false;
-    const finish = () => { if (!done) { done = true; vid.pause(); resolve(); } };
+    const finish = () => { if (!done) { done = true; clearInterval(wd); vid.pause(); resolve(); } };
+    // si la reproduccion se traba (no llegan cuadros), se pasa al modo cuadro a cuadro
+    const wd = setInterval(() => { if (!done && performance.now() - lastWall > 2500) finish(); }, 500);
+    // si llegan muy pocos cuadros por segundo, tambien
+    const lagging = () => (performance.now() - wallStart) > 1500 && (lastT - a) > 0.5 && n < 0.7 * 24 * (lastT - a);
     vid.addEventListener('ended', finish, { once: true });
     const hasRVFC = 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
-    const onFrame = (_, meta) => { const t = meta ? meta.mediaTime : vid.currentTime; grab(t); if (t >= b || encErr) finish(); else if (!done) schedule(); };
+    const onFrame = (_, meta) => { const t = meta ? meta.mediaTime : vid.currentTime; grab(t); if (t >= b || encErr) finish(); else if (lagging()) finish(); else if (!done) schedule(); };
     const schedule = () => hasRVFC ? vid.requestVideoFrameCallback(onFrame) : requestAnimationFrame(() => onFrame(null, null));
     const keepGoing = () => { if (!done && vid.paused && !document.hidden) vid.play().catch(() => {}); };
     vid.addEventListener('pause', () => setTimeout(keepGoing, 150));
     document.addEventListener('visibilitychange', keepGoing);
     grab(a); schedule(); vid.play().catch(() => {});
   });
+  if (lastT < b - 0.05 && !encErr && !vid.ended) { // modo cuadro a cuadro: un salto, un cuadro (no depende de la velocidad del teléfono)
+    stepMode = true; vid.pause();
+    const seekFrame = async t => {
+      let got = false;
+      if (rvfc) vid.requestVideoFrameCallback(() => { got = true; });
+      await seekTo(t);
+      for (let i = 0; rvfc && !got && i < 15; i++) await new Promise(r => setTimeout(r, 10));
+    };
+    for (let t = lastT + 1 / FPS; t <= b + 1e-6 && !encErr; t += 1 / FPS) {
+      await seekFrame(t);
+      while (venc.encodeQueueSize > 8) await new Promise(r => setTimeout(r, 10));
+      drawStage(t);
+      const f = new VideoFrame(cv, { timestamp: Math.round((t - a) * 1e6), duration: Math.round(1e6 / FPS) });
+      venc.encode(f, { keyFrame: n % (FPS * 2) === 0 }); f.close(); n++;
+      $('barFill').style.width = Math.min(100, (t - a) / (b - a) * 100) + '%';
+    }
+  }
   vid.muted = wasMuted;
   await venc.flush(); venc.close();
   if (encErr) throw encErr;
@@ -1151,7 +1194,8 @@ async function exportMp4(){
   if (wake) { try { wake.release(); } catch (e) {} wake = null; }
   $('saveBtn').hidden = false;
   $('saveBtn').textContent = `Guardar video (.mp4, ${(S.blob.size / 1048576).toFixed(1)} MB, ${(b - a).toFixed(1)} s)`;
-  msg((acodec || pass) ? 'Listo (audio ' + (pass ? 'original' : 'recodificado') + '). Tocá "Guardar video" para bajarlo.' : 'Listo, pero este teléfono no pudo agregar el sonido. Tocá "Guardar video".', (acodec || pass) ? 'ok' : 'warn');
+  const info = ' [' + (n / Math.max(0.1, b - a)).toFixed(0) + ' cuadros/s' + (stepMode ? ', cuadro a cuadro' : '') + ', tardó ' + ((performance.now() - tStart) / 1000).toFixed(0) + ' s]';
+  msg((acodec || pass) ? 'Listo (audio ' + (pass ? 'original' : 'recodificado') + ')' + info + '. Tocá "Guardar video" para bajarlo.' : 'Listo, pero este teléfono no pudo agregar el sonido' + info + '. Tocá "Guardar video".', (acodec || pass) ? 'ok' : 'warn');
   drawStage();
   return true;
 }
