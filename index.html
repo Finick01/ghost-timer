@@ -1082,10 +1082,10 @@ async function exportMp4(){
   S.exportStart = a; S.exportEnd = b;
   S.exporting = true; setExportUI(true);
   if (navigator.wakeLock) navigator.wakeLock.request('screen').then(w => wake = w).catch(() => {});
-  let audio = null, acodec = null;
-  try { audio = await sliceAudio48k(a, b); acodec = audio ? await pickAudioCodec(audio.numberOfChannels) : null; } catch (e) { audio = null; }
-  let pass = null; // sin codificador de audio (iPhone con iOS viejo): se copia el AAC original
-  if (!acodec) { try { pass = await demuxAacRange(S.file, a, b); } catch (e) { pass = null; console.error(e); } }
+  // audio: primero se copia el AAC original (no depende del navegador); si no se puede, se recodifica
+  let pass = null, audio = null, acodec = null;
+  try { pass = await demuxAacRange(S.file, a, b); } catch (e) { pass = null; console.error(e); }
+  if (!pass) { try { audio = await sliceAudio48k(a, b); acodec = audio ? await pickAudioCodec(audio.numberOfChannels) : null; } catch (e) { audio = null; acodec = null; } }
   const target = new Mp4Muxer.ArrayBufferTarget();
   const muxer = new Mp4Muxer.Muxer({
     target, fastStart: 'in-memory', firstTimestampBehavior: 'offset',
@@ -1124,7 +1124,14 @@ async function exportMp4(){
   if (encErr) throw encErr;
   // audio track from the original file
   if (acodec) {
-    const aenc = new AudioEncoder({ output: (c, m) => muxer.addAudioChunk(c, m), error: e => encErr = e });
+    // los bloques salen del codificador con marcas de tiempo repetidas: se reasignan seguidas (AAC = 1024 muestras por bloque)
+    let at = 0;
+    const aout = (c, m) => {
+      const buf = new Uint8Array(c.byteLength); c.copyTo(buf);
+      const dur = acodec.mux === 'aac' ? 1024 / 48000 * 1e6 : (c.duration > 0 ? c.duration : 20000);
+      muxer.addAudioChunkRaw(buf, c.type, Math.round(at), Math.round(dur), m); at += dur;
+    };
+    const aenc = new AudioEncoder({ output: aout, error: e => encErr = e });
     aenc.configure({ codec: acodec.codec, sampleRate: 48000, numberOfChannels: audio.numberOfChannels, bitrate: 160000 });
     const chs = audio.numberOfChannels, total = audio.length, step = 4800;
     const planes = []; for (let c = 0; c < chs; c++) planes.push(audio.getChannelData(c));
@@ -1144,7 +1151,7 @@ async function exportMp4(){
   if (wake) { try { wake.release(); } catch (e) {} wake = null; }
   $('saveBtn').hidden = false;
   $('saveBtn').textContent = `Guardar video (.mp4, ${(S.blob.size / 1048576).toFixed(1)} MB, ${(b - a).toFixed(1)} s)`;
-  msg((acodec || pass) ? 'Listo. Tocá "Guardar video" para bajarlo.' : 'Listo, pero este teléfono no pudo agregar el sonido. Tocá "Guardar video".', (acodec || pass) ? 'ok' : 'warn');
+  msg((acodec || pass) ? 'Listo (audio ' + (pass ? 'original' : 'recodificado') + '). Tocá "Guardar video" para bajarlo.' : 'Listo, pero este teléfono no pudo agregar el sonido. Tocá "Guardar video".', (acodec || pass) ? 'ok' : 'warn');
   drawStage();
   return true;
 }
